@@ -137,7 +137,7 @@ class MiscArguments:
   )
   # if you actually set the type hint to PromptStyle: you will find that HF/argparse assign a string anyway
   prompt_style: str = field(
-    default=PromptStyle.Chat,
+    default=PromptStyle.Chat.value,
     metadata={"choices": [p.value for p in PromptStyle]}
   )
   chat_memory: bool = field(
