@@ -1,4 +1,5 @@
 from transformers import (   
+	GenerationConfig,
 	StoppingCriteria,
 	StoppingCriteriaList,
 	TrainerCallback,
@@ -10,11 +11,12 @@ from transformers import (
 from dataclasses import dataclass, field
 from peft import PeftModelForCausalLM
 from datasets import Dataset
-from typing import List, Iterator, Iterable, TypedDict
+from typing import List, Iterable, TypedDict, Tuple
 from torch import LongTensor, FloatTensor
+from itertools import tee
 
 from .callback_text_iterator_streamer import CallbackTextIteratorStreamer
-from .collation import Collator
+from .collation import Collator, CollatedData, DataInstance
 from .iteration import nth, repeatedly
 
 class TokenizerOutput(TypedDict):
@@ -33,25 +35,46 @@ class StopOnTokens(StoppingCriteria):
 @dataclass
 class GenerationCallback(TrainerCallback):
 	model: PeftModelForCausalLM
-	# tokenizer: LlamaTokenizer
+	tokenizer: LlamaTokenizer
 	dataset: Dataset
 	collator: Collator
-	favourite_prompt: str = field(init=False)
-	data_it: Iterable[str] = field(init=False)
+	generation_config: GenerationConfig
+	favourite_sample: DataInstance = field(init=False)
+	data_it: Iterable[DataInstance] = field(init=False)
 	def __post_init__(self):
-		i: Iterator[str] = iter(self.dataset['input'])
+		io: Iterable[Tuple[str, str]] = zip(self.dataset['input'], self.dataset['output'])
+		it: Iterable[DataInstance] = (DataInstance(input=input, output=output) for input, output in io)
 		# What is $\sqrt{53}$ in simplest radical form?
-		self.favourite_prompt = nth(i, 3)
-		self.data_it = repeatedly(self.dataset['input'])
+		it0, it1 = tee(it, 2)
+		self.favourite_sample = nth(it0, 2)
+		self.data_it = repeatedly(it1)
 
+		stop_token_ids: List[int] = [self.tokenizer.eos_token_id]
+		stop = StopOnTokens(stop_token_ids)
+		self.stopping_criteria = StoppingCriteriaList([stop])
 
 	def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
 		"""
 		Event called at the beginning of a training step. If using gradient accumulation, one training step might take
 		several inputs.
 		"""
-		prompts: List[str] = [self.favourite_prompt, next(self.data_it)]
-		# tokenized_prompts: TokenizerOutput = self.tokenizer(prompts, return_tensors='pt', truncation=True)
-		for input in prompts:
-			streamer=CallbackTextIteratorStreamer()
-			# TODO
+		samples: List[DataInstance] = [self.favourite_sample, next(self.data_it)]
+		# collate individually? or as a batch? or never do more than during a step?
+		# collateds: List[CollatedData] = [self.collator([sample]) for sample in samples]
+		collated: CollatedData = self.collator(samples)
+		# for sample in samples:
+		streamer=CallbackTextIteratorStreamer()
+		prediction: LongTensor = self.model.generate(
+			input_ids=collated['input_ids'].to(self.model.device),
+			attention_mask=collated['attention_mask'].to(self.model.device),
+			generation_config=self.generation_config,
+			do_sample=self.generation_config.temperature > 0.,
+			stopping_criteria=self.stopping_criteria,
+			# TODO: streamer probably doesn't make sense for batches
+			streamer=streamer,
+		)
+		decodeds: List[str] = self.tokenizer.decode(prediction[0, collated['input_ids'].size(-1):], skip_special_tokens=True, clean_up_tokenization_spaces=True)
+		for decoded in decodeds:
+			# TODO: wandb
+			print(decoded)
+		pass # put breakpoint here
