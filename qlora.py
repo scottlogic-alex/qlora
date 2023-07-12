@@ -433,12 +433,20 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
     if not args.full_finetune:
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
 
+    if lora_name_or_path is not None:
+        print(f"Loading base LoRA from checkpoint '{lora_name_or_path}'.")
+        model = PeftModel.from_pretrained(
+            model,
+            lora_name_or_path,
+            is_trainable=True,
+        )
+
     if not args.full_finetune:
-        if checkpoint_dir is not None or lora_name_or_path is not None:
+        if checkpoint_dir is not None:
             print("Loading adapters from checkpoint.")
             model = PeftModel.from_pretrained(
                 model,
-                join(checkpoint_dir, 'adapter_model') if checkpoint_dir is not None else lora_name_or_path,
+                join(checkpoint_dir, 'adapter_model'),
                 is_trainable=True,
             )
         else:
