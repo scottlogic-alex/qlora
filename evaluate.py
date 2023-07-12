@@ -98,17 +98,9 @@ class ModelArguments:
     default=False,
     metadata={"help": "Compute type of the model. If quantizing: this is also the compute type used for quantized computations. Prefer to turn this on if you are quantizing and your GPU supports it. You probably also want it even if you're not quantizing."}
   )
-  register_process_supervision_tokens: Optional[bool] = field(
-    default=False,
-    metadata={"help": "Register tokens for process supervision prompt template such as <|start_step|>, <|end_step|>"}
-  )
   use_bos_token_in_prompt: Optional[bool] = field(
     default=False,
     metadata={"help": "If your model was pretrained to utilise BOS (e.g. LLaMA), then make use of it in prompt."}
-  )
-  register_bos_token: Optional[bool] = field(
-    default=False,
-    metadata={"help": "GPTNeoXTokenizer doesn't have a true BOS token registered. Register one."}
   )
 
 @dataclass
@@ -165,28 +157,6 @@ class GenerationArguments:
   length_penalty: Optional[float] = field(default=1.0)
   no_repeat_ngram_size: Optional[int] = field(default=0)
 
-def smart_tokenizer_and_embedding_resize(
-  special_tokens_dict: Dict[str, Union[str, AddedToken, List[str]]],
-  tokenizer: PreTrainedTokenizer,
-  model: PreTrainedModel,
-):
-  """Resize tokenizer and embedding.
-
-  Note: This is the unoptimized version that may make your embedding size not be divisible by 64.
-  """
-  num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
-  model.resize_token_embeddings(len(tokenizer))
-
-  if num_new_tokens > 0:
-    input_embeddings = model.get_input_embeddings().weight.data
-    output_embeddings = model.get_output_embeddings().weight.data
-
-    input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
-    output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
-
-    input_embeddings[-num_new_tokens:] = input_embeddings_avg
-    output_embeddings[-num_new_tokens:] = output_embeddings_avg
-
 def get_model(args: ModelArguments) -> LlamaForCausalLM:
   config = AutoConfig.from_pretrained(
     args.model_name_or_path,
@@ -242,22 +212,7 @@ def main():
     use_fast = False,
     tokenizer_type='llama' if 'llama' in (model_args.tokenizer_model_name_or_path or model_args.model_name_or_path) else None, # Needed for HF name change
   )
-  if model_args.use_bos_token_in_prompt and tokenizer._bos_token is None:
-    assert model_args.register_bos_token, "You have required (via --use_bos_token_in_prompt) that BOS token be used in prompt, but this tokenizer doesn't have one. you should either register a BOS token via --register_bos_token, or (preferably) avoid using --use_bos_token_in_prompt, as the model was not pretrained to park attention on BOS when there's nothing to attend to."
-  special_tokens: Dict[str, str] = {}
-  if tokenizer._pad_token is None:
-    special_tokens['pad_token'] = DEFAULT_PAD_TOKEN
-  if tokenizer._bos_token is None and model_args.register_bos_token:
-    special_tokens['bos_token'] = DEFAULT_BOS_TOKEN
-  if model_args.register_process_supervision_tokens:
-    special_tokens['additional_special_tokens'] = list(process_supervision_tokens.values())
-  if special_tokens:
-    assert model_args.embedding_path is not None, "If you're resizing the embedding layer, you will want to replace its weights with the embed_tokens.pt that qlora.py saved during training"
-    smart_tokenizer_and_embedding_resize(
-      special_tokens_dict=special_tokens,
-      tokenizer=tokenizer,
-      model=model,
-    )
+
   if 'llama' in model_args.tokenizer_model_name_or_path or isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
     # LLaMA tokenizer may not have correct special tokens set.
     # Check and add them if missing to prevent them from being parsed into different tokens.
@@ -285,7 +240,10 @@ def main():
     model_args.lora_model_name_or_path,
   ).eval()
 
-  if model_args.embedding_path is not None:
+  if model_args.embedding_path is None:
+    assert model.get_input_embeddings().weight.shape[0] == len(tokenizer), f"must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {model.get_input_embeddings().weight.shape[0]} embeddings."
+  else:
+    print(f'Applying finetuned token embedding weights from {model_args.embedding_path}.')
     _, extension = splitext(model_args.embedding_path)
     if extension == '.pt':
       state_dict: OrderedDict[str, FloatTensor] = torch.load(model_args.embedding_path, map_location=model.device, weights_only=True)
@@ -294,7 +252,10 @@ def main():
       state_dict: OrderedDict[str, FloatTensor] = load_file(model_args.embedding_path, device=model.device)
     embedding: Embedding = model.get_input_embeddings()
     orig_device, orig_dtype = embedding.weight.device, embedding.weight.dtype
-    assert embedding.weight.shape == state_dict['weight'].shape, f"the embedding weights in the saved state dict are a different shape ({state_dict['weight'].shape}) than the resized embedding we computed ({embedding.weight.shape}). this could indicate that your options such as --register_process_supervision_tokens do not match those used during training."
+
+    assert state_dict['weight'].shape[0] == len(tokenizer), f"embeddings state dict must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {state_dict['weight'].shape[0]} embeddings."
+    embedding: Embedding = model.resize_token_embeddings(len(tokenizer))
+
     embedding.load_state_dict(state_dict)
     embedding.weight.to(device=orig_device, dtype=orig_dtype)
 
