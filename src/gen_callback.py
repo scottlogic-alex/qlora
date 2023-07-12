@@ -11,13 +11,13 @@ from transformers import (
 from dataclasses import dataclass, field
 from peft import PeftModelForCausalLM
 from datasets import Dataset
-from typing import List, Iterable, TypedDict, Tuple
+from typing import List, Iterable, TypedDict, Tuple, Iterator
 from torch import LongTensor, FloatTensor
-from itertools import tee
+from itertools import tee, chain, repeat
 
 from .callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from .collation import Collator, CollatedData, DataInstance
-from .iteration import nth, repeatedly
+from .iteration import nth, repeatedly, roundrobin
 
 class TokenizerOutput(TypedDict):
   input_ids: LongTensor
@@ -39,15 +39,17 @@ class GenerationCallback(TrainerCallback):
 	dataset: Dataset
 	collator: Collator
 	generation_config: GenerationConfig
-	favourite_sample: DataInstance = field(init=False)
-	data_it: Iterable[DataInstance] = field(init=False)
+	test_instances: Iterator[DataInstance] = field(init=False)
 	def __post_init__(self):
 		io: Iterable[Tuple[str, str]] = zip(self.dataset['input'], self.dataset['output'])
 		it: Iterable[DataInstance] = (DataInstance(input=input, output=output) for input, output in io)
 		# What is $\sqrt{53}$ in simplest radical form?
 		it0, it1 = tee(it, 2)
-		self.favourite_sample = nth(it0, 2)
-		self.data_it = repeatedly(it1)
+		favourite_sample: DataInstance = nth(it0, 2)
+		data_it: Iterable[DataInstance] = repeatedly(it1)
+
+		# alternates between our favourite, and a random
+		self.test_instances = iter(roundrobin(repeat(favourite_sample), data_it))
 
 		stop_token_ids: List[int] = [self.tokenizer.eos_token_id]
 		stop = StopOnTokens(stop_token_ids)
@@ -58,10 +60,8 @@ class GenerationCallback(TrainerCallback):
 		Event called at the beginning of a training step. If using gradient accumulation, one training step might take
 		several inputs.
 		"""
-		samples: List[DataInstance] = [self.favourite_sample, next(self.data_it)]
-		# collate individually? or as a batch? or never do more than during a step?
-		# collateds: List[CollatedData] = [self.collator([sample]) for sample in samples]
-		collated: CollatedData = self.collator(samples)
+		sample: DataInstance = next(self.test_instances)
+		collated: CollatedData = self.collator([sample])
 		# for sample in samples:
 		streamer=CallbackTextIteratorStreamer()
 		prediction: LongTensor = self.model.generate(
