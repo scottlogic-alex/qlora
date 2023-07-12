@@ -787,18 +787,14 @@ def train():
         assert args.register_process_supervision_tokens, 'prm800k-solutions dataset_format requires tokenizer to support process supervision special tokens. enable --register_process_supervision_tokens.'
         if 'pythia' in args.model_name_or_path:
             assert args.register_bos_token, "GPTNeoXTokenizer doesn't have a legitimate BOS token, but prm800k-solutions dataset_format makes use of BOS in its prompt template. enable --register_bos_token"
-    if tokenizer._pad_token is None or args.register_process_supervision_tokens or args.register_bos_token:
-        special_tokens: Dict[str, str] = {
-            **({
-                'pad_token': DEFAULT_PAD_TOKEN,
-            } if tokenizer._pad_token else {}),
-            **({
-                'bos_token': DEFAULT_BOS_TOKEN,
-            } if args.register_bos_token else {}),
-            **({
-                'additional_special_tokens': list(process_supervision_tokens.values())
-            } if args.register_process_supervision_tokens else {}),
-        }
+    special_tokens: Dict[str, str] = {}
+    if tokenizer._pad_token is None:
+        special_tokens['pad_token'] = DEFAULT_PAD_TOKEN
+    if args.register_bos_token:
+        special_tokens['bos_token'] = DEFAULT_BOS_TOKEN
+    if args.register_process_supervision_tokens:
+        special_tokens['additional_special_tokens'] = list(process_supervision_tokens.values())
+    if special_tokens:
         smart_tokenizer_and_embedding_resize(
             special_tokens_dict=special_tokens,
             tokenizer=tokenizer,
