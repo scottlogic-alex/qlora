@@ -8,7 +8,7 @@ import os
 from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
-from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union, Literal
+from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union, Literal, Tuple
 import numpy as np
 from tqdm import tqdm
 import logging
@@ -204,6 +204,10 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
         metadata={"help": "To use wandb or something else for reporting."}
     )
     output_dir: str = field(default='./output', metadata={"help": 'The output dir for logs and checkpoints'})
+    checkpoint_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Specify a checkpoint dir explicitly (this is a more precise way of specifying which checkpoint you want to resume from than output_dir, which would force you to pick the latest checkpoint from a given output dir)"}
+    )
     optim: str = field(default='paged_adamw_32bit', metadata={"help": 'The optimizer to be used'})
     per_device_train_batch_size: int = field(default=1, metadata={"help": 'The training batch size per GPU. Increase for better speed.'})
     per_device_eval_batch_size: int = field(default=1, metadata={"help": 'The eval batch size per GPU. Increase for better speed.'})
@@ -368,7 +372,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
 
     if not args.full_finetune:
         if checkpoint_dir is not None:
-            print("Loading adapters from checkpoint.")
+            print(f"Loading adapters from checkpoint '{checkpoint_dir}'.")
             model = PeftModel.from_pretrained(
                 model,
                 join(checkpoint_dir, 'adapter_model'),
@@ -752,7 +756,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         data_collator=data_collator
     )
 
-def get_last_checkpoint(checkpoint_dir):
+def get_last_checkpoint(checkpoint_dir) -> Tuple[Optional[str], bool]:
     if isdir(checkpoint_dir):
         is_completed = exists(join(checkpoint_dir, 'completed'))
         if is_completed: return None, True # already finished
@@ -777,9 +781,14 @@ def train():
         **vars(model_args), **vars(data_args), **vars(training_args)
     )
 
-    checkpoint_dir, completed_training = get_last_checkpoint(args.output_dir)
-    if completed_training:
-        print('Detected that training was already completed!')
+    if training_args.checkpoint_dir is None:
+        checkpoint_dir, completed_training = get_last_checkpoint(args.output_dir)
+        if completed_training:
+            print('Detected that training was already completed!')
+    else:
+        checkpoint_dir: str = training_args.checkpoint_dir
+        print(f'checkpoint_dir {checkpoint_dir} was specified')
+        completed_training = True
 
     model = get_accelerate_model(args, checkpoint_dir, model_args.lora_name_or_path)
 
