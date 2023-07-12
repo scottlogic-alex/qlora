@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from peft import PeftModelForCausalLM
 from datasets import Dataset
 from typing import List, Iterable, TypedDict, Iterator, Dict, Literal
-from torch import LongTensor
+from torch import LongTensor, no_grad
 from itertools import tee, cycle
 from enum import Enum, auto
 
@@ -72,7 +72,7 @@ class GenerationCallback(TrainerCallback):
 		if self.use_bos_token_in_prompt:
 			sample = f"{self.tokenizer.bos_token}{sample}"
 
-		with truncation_side(self.tokenizer, 'left'):
+		with truncation_side(self.tokenizer, 'left'), no_grad():
 			encoded: BatchEncoding = self.tokenizer(
 				sample,
 				max_length=self.source_max_len,
@@ -89,21 +89,25 @@ class GenerationCallback(TrainerCallback):
 
 		streamer = CallbackTextIteratorStreamer(self.tokenizer, callback=on_text, skip_prompt=True, skip_special_tokens=False)
 
-		prediction: LongTensor = self.model.generate(
-			input_ids=encoded['input_ids'].to(self.model.device),
-			attention_mask=encoded['attention_mask'].to(self.model.device),
-			generation_config=self.generation_config,
-			do_sample=self.generation_config.temperature > 0.,
-			stopping_criteria=self.stopping_criteria,
-			streamer=streamer,
-		)
+		with no_grad():
+			prediction: LongTensor = self.model.generate(
+				input_ids=encoded['input_ids'].to(self.model.device),
+				attention_mask=encoded['attention_mask'].to(self.model.device),
+				generation_config=self.generation_config,
+				do_sample=self.generation_config.temperature > 0.,
+				stopping_criteria=self.stopping_criteria,
+				streamer=streamer,
+			)
+		print('')
 
 		# decoded: str = self.tokenizer.decode(prediction[0, encoded['input_ids'].size(-1):], skip_special_tokens=False, clean_up_tokenization_spaces=True)
 
 		if self.report_to_wandb:
 			import wandb
-			metrics: Dict[Literal['prompt_fav', 'prompt_rand'], str] = {
- 				'prompt_fav' if sample_source is SampleSource.Favourite else 'prompt_rand': response,
+			metric_key: Literal['prompt_fav', 'prompt_rand'] = 'prompt_fav' if sample_source is SampleSource.Favourite else 'prompt_rand'
+			table = wandb.Table(data=[[sample, response]], columns=['Prompt', 'Continuation'])
+			metrics: Dict[Literal['prompt_fav', 'prompt_rand'], wandb.Table] = {
+ 				metric_key: table,
 			}
 			wandb.log(metrics, step=state.global_step)
 		pass # put breakpoint here
