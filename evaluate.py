@@ -21,10 +21,11 @@ import logging
 from enum import Enum
 import sys
 from os.path import splitext
+from time import perf_counter
 
 from transformers import AutoTokenizer
 from safetensors.torch import load_file
-from typing import Optional, Union, OrderedDict
+from typing import Optional, OrderedDict
 
 from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from src.stop_on_tokens import StopOnTokens
@@ -53,6 +54,10 @@ class Participant(Enum):
 class Message(NamedTuple):
   participant: Participant
   message: str
+
+class PromptStyle(Enum):
+  Bare = 'bare'
+  Chat = 'chat'
 
 class SufficientResponse(BaseException): ...
 
@@ -125,6 +130,27 @@ class MiscArguments:
   )
   tokenizer_cache_dir: Optional[str] = field(
     default=None
+  )
+  initial_input: Optional[str] = field(
+    default=None,
+    metadata={"help": "Initial message sent to the model. For example: What is $\sqrt{53}$ in simplest radical form?"}
+  )
+  # if you actually set the type hint to PromptStyle: you will find that HF/argparse assign a string anyway
+  prompt_style: str = field(
+    default=PromptStyle.Chat,
+    metadata={"choices": [p.value for p in PromptStyle]}
+  )
+  chat_memory: bool = field(
+    default=False,
+    metadata={"help": "Whether chat sequence should accumulate a conversation context, or reset each time"}
+  )
+  reseed_each_prompt: bool = field(
+    default=True,
+    metadata={"help": "Reset seed before each user input"}
+  )
+  measure_perf: bool = field(
+    default=True,
+    metadata={"help": "Print inference speed"}
   )
 
 @dataclass
@@ -277,7 +303,6 @@ def main():
     lm_head.load_state_dict(lm_head_state_dict)
     lm_head.weight.to(device=orig_device, dtype=orig_dtype)
 
-  set_seed(misc_args.seed)
   if misc_args.compile:
     torch.compile(model, mode='max-autotune')
 
@@ -289,6 +314,7 @@ def main():
   history: List[Message] = [Message(Participant.System, misc_args.system_prompt)] if misc_args.system_prompt else []
 
   reset_ansi='\x1b[0m'
+  cyan_ansi='\x1b[31;36m'
   blue_ansi='\x1b[31;34m'
   green_ansi='\x1b[31;32m'
   purple_ansi='\x1b[31;35m'
@@ -308,27 +334,34 @@ def main():
   first = True
   while True:
     try:
-      if first:
-        user_input = 'What is $\sqrt{53}$ in simplest radical form?'
+      if first and misc_args.initial_input is not None:
+        user_input = misc_args.initial_input
         print(f'{purple_ansi}{user_input}')
       else:
-        # user_input = input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
-        user_input = input(prompt)
+        user_input = input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
     except KeyboardInterrupt:
       sys.exit(0)
     print(reset_ansi, end='')
 
+    if misc_args.reseed_each_prompt or first:
+      set_seed(misc_args.seed)
     first = False
   
-    chat_to_complete: str = '\n\n'.join([
-      format_message(message) for message in [
-        *history,
-        Message(Participant.User, user_input),
-        Message(Participant.Assistant, process_supervision_tokens['step_start']),
-      ]
-    ])
-    if model_args.use_bos_token_in_prompt:
-      chat_to_complete: str = f'{tokenizer.bos_token}{chat_to_complete}'
+    match misc_args.prompt_style:
+      case PromptStyle.Chat.value:
+        chat_to_complete: str = '\n\n'.join([
+          format_message(message) for message in [
+            *history,
+            Message(Participant.User, user_input),
+            Message(Participant.Assistant, process_supervision_tokens['step_start']),
+          ]
+        ])
+        if model_args.use_bos_token_in_prompt:
+          chat_to_complete: str = f'{tokenizer.bos_token}{chat_to_complete}'
+      case PromptStyle.Bare.value:
+        chat_to_complete: str = user_input
+      case _:
+        raise ValueError(f'Never heard of a {misc_args.prompt_style} PromptStyle.')
 
     tokenized_prompts: TokenizerOutput = tokenizer([chat_to_complete], return_tensors='pt', truncation=True)
     
@@ -372,6 +405,7 @@ def main():
     streamer = CallbackTextIteratorStreamer(tokenizer, callback=on_text, skip_prompt=True, skip_special_tokens=False)
 
     try:
+      inference_start: float = perf_counter()
       prediction: LongTensor = model.generate(
         input_ids=tokenized_prompts.input_ids.to(model.device),
         attention_mask=tokenized_prompts.attention_mask.to(model.device),
@@ -387,12 +421,19 @@ def main():
       # but we're already streaming it to the console via our callback
     except (KeyboardInterrupt, SufficientResponse):
       pass
+    inference_duration: float = perf_counter()-inference_start
+    token_in_count: int = tokenized_prompts.input_ids.size(-1)
+    token_out_count: int = prediction.size(-1) - token_in_count
+    tokens_out_per_sec: float = token_out_count/inference_duration
 
     # reset ANSI control sequence (plus line break)
     print(reset_ansi)
 
-    # don't add to history. this is an instruction-response model, not a chatbot
-    # history += [Message(Participant.Assistant, response)]
+    if misc_args.measure_perf:
+      print(f'{cyan_ansi}ctx length: {token_in_count}\ntokens out: {token_out_count}\nduration: {inference_duration:.2f} secs\nspeed: {tokens_out_per_sec:.2f} tokens/sec{reset_ansi}')
+
+    if misc_args.chat_memory:
+      history += [Message(Participant.Assistant, response)]
 
 if __name__ == "__main__":
   main()
