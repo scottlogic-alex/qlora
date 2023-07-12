@@ -69,6 +69,10 @@ class GenerationCallback(TrainerCallback):
 		sample_source: SampleSource = next(self.sample_source)
 
 		sample: str = self.favourite_sample if sample_source is SampleSource.Favourite else next(self.data_it)
+
+		instruction: str = sample[sample.find('Instruction:\n')+len('Instruction:\n'):]
+		instruction: str = instruction[:instruction.find('\n\n### Response:\n')]
+
 		if self.use_bos_token_in_prompt:
 			sample = f"{self.tokenizer.bos_token}{sample}"
 
@@ -89,6 +93,7 @@ class GenerationCallback(TrainerCallback):
 
 		streamer = CallbackTextIteratorStreamer(self.tokenizer, callback=on_text, skip_prompt=True, skip_special_tokens=False)
 
+		print(instruction)
 		with no_grad():
 			prediction: LongTensor = self.model.generate(
 				input_ids=encoded['input_ids'].to(self.model.device),
@@ -105,7 +110,7 @@ class GenerationCallback(TrainerCallback):
 		if self.report_to_wandb:
 			import wandb
 			metric_key: Literal['prompt_fav', 'prompt_rand'] = 'prompt_fav' if sample_source is SampleSource.Favourite else 'prompt_rand'
-			table = wandb.Table(data=[[sample, response]], columns=['Prompt', 'Continuation'])
+			table = wandb.Table(data=[[instruction, response]], columns=['Instruction', 'Response'])
 			metrics: Dict[Literal['prompt_fav', 'prompt_rand'], wandb.Table] = {
  				metric_key: table,
 			}
