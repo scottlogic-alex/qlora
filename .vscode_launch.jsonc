@@ -1,0 +1,200 @@
+// since .vscode/launch.json is ignored:
+// here's some run configurations you may wish to copy.
+{
+  "configurations": [
+    {
+      "name": "Python: QLoRA train Llama-7b + Alpaca (special tokens)",
+      "type": "python",
+      "request": "launch",
+      "module": "qlora",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-7b",
+        "--lora_name_or_path", "tloen/alpaca-lora-7b",
+        "--dataset", "prm800k-solutions",
+        "--dataset_format", "prm800k-solutions",
+        "--bf16",
+        "--max_memory_MB", "24000",
+        "--use_bos_token_in_prompt",
+        // remove --register_process_supervision_tokens if you wish to leave the tokenizer + embeddings unchanged
+        "--register_process_supervision_tokens",
+        "--truncate_toward_center",
+        "--source_max_len", "184",
+        "--target_max_len", "998",
+        "--gradient_accumulation_steps", "4",
+        "--per_device_train_batch_size", "4",
+        "--per_device_eval_batch_size", "4",
+        "--learning_rate", "0.0002",
+        "--run_name", "7b_alpaca_special",
+        "--report_to", "wandb",
+        "--save_steps", "64",
+        "--save_total_limit", "3",
+        "--max_steps", "1664",
+        "--evaluation_strategy", "steps",
+        "--eval_steps", "64",
+        "--generate_steps", "16"
+      ],
+      "env": {
+        "LOCAL_RANK": "-1"
+      }
+    },
+    {
+      "name": "Python: QLoRA train Llama-13b + Alpaca (special tokens)",
+      "type": "python",
+      "request": "launch",
+      "module": "qlora",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-13b",
+        "--lora_name_or_path", "chansung/alpaca-lora-13b",
+        "--dataset", "prm800k-solutions",
+        "--dataset_format", "prm800k-solutions",
+        "--bf16",
+        "--max_memory_MB", "24000",
+        "--use_bos_token_in_prompt",
+        // remove --register_process_supervision_tokens if you wish to leave the tokenizer + embeddings unchanged
+        "--register_process_supervision_tokens",
+        "--truncate_toward_center",
+        "--source_max_len", "184",
+        "--target_max_len", "998",
+        "--gradient_accumulation_steps", "4",
+        "--per_device_train_batch_size", "4",
+        "--per_device_eval_batch_size", "4",
+        "--learning_rate", "0.0002",
+        "--run_name", "13b_alpaca_special",
+        "--report_to", "wandb",
+        "--save_steps", "64",
+        "--save_total_limit", "3",
+        "--max_steps", "1664",
+        "--evaluation_strategy", "steps",
+        "--eval_steps", "64",
+        "--generate_steps", "16"
+      ],
+      "env": {
+        "LOCAL_RANK": "-1"
+      }
+    },
+    {
+      "name": "Python: QLoRA ('predict' mode)",
+      "type": "python",
+      "request": "launch",
+      "module": "qlora",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-7b",
+        "--tokenizer_model_name_or_path", "Birchlabs/llama-stepwise-tokenizer",
+        "--checkpoint_dir", "output_nospecial_brief/checkpoint-128",
+        "--dataset", "prm800k-solutions",
+        "--dataset_format", "prm800k-solutions",
+        "--bf16",
+        "--max_memory_MB", "24000",
+        "--use_bos_token_in_prompt",
+        "--truncate_toward_center",
+        "--source_max_len", "184",
+        "--target_max_len", "998",
+        "--do_train", "False",
+        "--do_eval", "False",
+        "--do_predict", "True",
+        "--predict_with_generate",
+        "--do_sample",
+        "--top_p", "0.9",
+        "--num_beams", "1"
+      ],
+      "env": {
+        "LOCAL_RANK": "-1"
+      }
+    },
+    {
+      "name": "Python: Evaluate Llama-7b",
+      "type": "python",
+      "request": "launch",
+      "module": "evaluate",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-7b",
+        "--tokenizer_model_name_or_path", "huggyllama/llama-7b",
+        "--bf16",
+        "--overrun_countermeasures", "False",
+        "--prompt_style", "bare"
+      ]
+    },
+    {
+      "name": "Python: Evaluate Llama-7b + Alpaca",
+      "type": "python",
+      "request": "launch",
+      "module": "evaluate",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-7b",
+        "--lora_model_name_or_path", "tloen/alpaca-lora-7b",
+        "--tokenizer_model_name_or_path", "huggyllama/llama-7b",
+        "--use_bos_token_in_prompt",
+        "--bf16",
+        "--overrun_countermeasures", "False"
+      ]
+    },
+    {
+      "name": "Python: Evaluate Llama-7b + Alpaca + stepwise (no special)",
+      "type": "python",
+      "request": "launch",
+      "module": "evaluate",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-7b",
+        "--base_lora_model_name_or_path", "tloen/alpaca-lora-7b",
+        "--tokenizer_model_name_or_path", "huggyllama/llama-7b",
+        "--lora_model_name_or_path", "/home/birch/git/qlora/output_alpaca_no_special_tokens_io_long_2/checkpoint-1664/adapter_model",
+        "--use_bos_token_in_prompt",
+        "--bf16",
+        "--overrun_countermeasures", "False"
+      ]
+    },
+    {
+      "name": "Python: Evaluate Llama-13b + Alpaca",
+      "type": "python",
+      "request": "launch",
+      "module": "evaluate",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-13b",
+        "--tokenizer_model_name_or_path", "huggyllama/llama-13b",
+        "--lora_model_name_or_path", "chansung/alpaca-lora-13b",
+        "--use_bos_token_in_prompt",
+        "--bf16",
+        "--overrun_countermeasures", "False"
+      ]
+    },
+    {
+      "name": "Python: Evaluate Llama-13b + Alpaca + stepwise (special)",
+      "type": "python",
+      "request": "launch",
+      "module": "evaluate",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-13b",
+        "--base_lora_model_name_or_path", "chansung/alpaca-lora-13b",
+        "--tokenizer_model_name_or_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664",
+        "--lora_model_name_or_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664/adapter_model",
+        "--input_embedding_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664/embed_tokens.pt",
+        "--output_embedding_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664/lm_head.pt",
+        "--use_bos_token_in_prompt",
+        "--bf16",
+        "--overrun_countermeasures", "False",
+      ]
+    },
+    {
+      "name": "Python: Evaluate Llama-30b",
+      "type": "python",
+      "request": "launch",
+      "module": "evaluate",
+      "justMyCode": false,
+      "args": [
+        "--model_name_or_path", "huggyllama/llama-30b",
+        "--tokenizer_model_name_or_path", "huggyllama/llama-30b",
+        "--bf16",
+        "--overrun_countermeasures", "False",
+        "--prompt_style", "bare"
+      ]
+    }
+  ]
+}
