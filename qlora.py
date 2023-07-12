@@ -21,7 +21,7 @@ from packaging.version import parse
 import torch
 import transformers
 from torch import LongTensor
-from contextlib import ContextDecorator, nullcontext
+from contextlib import nullcontext
 from torch.nn.utils.rnn import pad_sequence
 import argparse
 from transformers import (
@@ -833,7 +833,7 @@ def get_last_checkpoint(checkpoint_dir):
 
 def train():
     hfparser = transformers.HfArgumentParser((
-        ModelArguments, DataArguments, TrainingArguments, GenerationArguments
+        ModelArguments, DataArguments, TrainingArguments, GenerationArguments,
     ))
     model_args, data_args, training_args, generation_args, extra_args = \
         hfparser.parse_args_into_dataclasses(return_remaining_strings=True)
@@ -860,7 +860,7 @@ def train():
         wandb.init(
             entity='scottlogic',
             project='llm-stepwise',
-            name=f'llama7b-bsz{training_args.per_device_train_batch_size}-bit{training_args.bits}',
+            name=f'llama7b-bsz{training_args.per_device_train_batch_size}-bit{training_args.bits}' if args.run_name is None else args.run_name,
             config={
                 "batch_size": training_args.per_device_train_batch_size,
                 "learning_rate": training_args.learning_rate,
