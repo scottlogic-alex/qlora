@@ -3,6 +3,7 @@ from typing import Optional, TypedDict, NamedTuple, List, Dict
 import torch
 from torch import LongTensor
 from transformers import (
+  AddedToken,
   AutoConfig,
   AutoModelForCausalLM,
   AutoTokenizer,
@@ -10,6 +11,8 @@ from transformers import (
   GenerationConfig,
   HfArgumentParser,
   set_seed,
+  PreTrainedTokenizer,
+  PreTrainedModel,
   StoppingCriteriaList,
   LlamaForCausalLM,
   LlamaTokenizer,
@@ -21,11 +24,10 @@ from enum import Enum
 import sys
 
 from transformers import AutoTokenizer
-from typing import Optional
+from typing import Optional, Union
 
 from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from src.stop_on_tokens import StopOnTokens
-from qlora import smart_tokenizer_and_embedding_resize
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,28 @@ class GenerationArguments:
   repetition_penalty: Optional[float] = field(default=1.0)
   length_penalty: Optional[float] = field(default=1.0)
   no_repeat_ngram_size: Optional[int] = field(default=0)
+
+def smart_tokenizer_and_embedding_resize(
+  special_tokens_dict: Dict[str, Union[str, AddedToken, List[str]]],
+  tokenizer: PreTrainedTokenizer,
+  model: PreTrainedModel,
+):
+  """Resize tokenizer and embedding.
+
+  Note: This is the unoptimized version that may make your embedding size not be divisible by 64.
+  """
+  num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
+  model.resize_token_embeddings(len(tokenizer))
+
+  if num_new_tokens > 0:
+    input_embeddings = model.get_input_embeddings().weight.data
+    output_embeddings = model.get_output_embeddings().weight.data
+
+    input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+    output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+
+    input_embeddings[-num_new_tokens:] = input_embeddings_avg
+    output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 def get_model(args: ModelArguments) -> LlamaForCausalLM:
   config = AutoConfig.from_pretrained(
