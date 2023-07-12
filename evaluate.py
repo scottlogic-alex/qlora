@@ -9,10 +9,7 @@ from transformers import (
   BitsAndBytesConfig,
   GenerationConfig,
   HfArgumentParser,
-  PreTrainedTokenizer,
-  PreTrainedModel,
   set_seed,
-  StoppingCriteria,
   StoppingCriteriaList,
   LlamaForCausalLM,
   LlamaTokenizer,
@@ -23,8 +20,12 @@ import logging
 from enum import Enum
 import sys
 
-from transformers import AutoTokenizer, TextIteratorStreamer
-from typing import Optional, Protocol
+from transformers import AutoTokenizer
+from typing import Optional
+
+from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
+from src.stop_on_tokens import StopOnTokens
+from qlora import smart_tokenizer_and_embedding_resize
 
 logger = logging.getLogger(__name__)
 
@@ -38,45 +39,6 @@ process_supervision_tokens: Dict[str, str] = {
   'answer_end':   '<|answer_end|>',
 }
 
-class TextCallback(Protocol):
-  def __call__(self, text: str, stream_end: bool = False) -> None: ...
-
-class CallbackTextIteratorStreamer(TextIteratorStreamer):
-  callback: TextCallback
-  def __init__(
-      self, tokenizer: AutoTokenizer, callback: TextCallback, skip_prompt: bool = False, timeout: Optional[float] = None, **decode_kwargs
-    ):
-    super().__init__(tokenizer, skip_prompt, **decode_kwargs)
-    self.callback = callback
-
-  def on_finalized_text(self, text: str, stream_end: bool = False):
-    self.callback(text, stream_end=stream_end)
-
-def smart_tokenizer_and_embedding_resize(
-    special_tokens_dict: Dict,
-    tokenizer: PreTrainedTokenizer,
-    model: PreTrainedModel,
-):
-  """Resize tokenizer and embedding.
-
-  Note: This is the unoptimized version that may make your embedding size not be divisible by 64.
-  """
-  # num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
-
-  # should equal 5; [PAD], plus the four process_supervision_tokens, were added during our finetune
-  num_new_tokens = model.get_input_embeddings().num_embeddings - len(tokenizer)
-  model.resize_token_embeddings(len(tokenizer))
-
-  if num_new_tokens > 0:
-    input_embeddings = model.get_input_embeddings().weight.data
-    output_embeddings = model.get_output_embeddings().weight.data
-
-    input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
-    output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
-
-    input_embeddings[-num_new_tokens:] = input_embeddings_avg
-    output_embeddings[-num_new_tokens:] = output_embeddings_avg
-
 class TokenizerOutput(TypedDict):
   input_ids: LongTensor
   attention_mask: LongTensor
@@ -89,15 +51,6 @@ class Participant(Enum):
 class Message(NamedTuple):
   participant: Participant
   message: str
-
-@dataclass
-class StopOnTokens(StoppingCriteria):
-  stop_token_ids: List[int]
-  def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
-    for stop_id in self.stop_token_ids:
-      if input_ids[0][-1] == stop_id:
-        return True
-    return False
 
 class SufficientResponse(BaseException): ...
 
@@ -283,6 +236,7 @@ def main():
       ),
     })
 
+  print('Applying LoRA.')
   model: PeftModelForCausalLM = PeftModel.from_pretrained(
     model,
     model_args.lora_model_name_or_path,

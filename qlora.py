@@ -45,6 +45,7 @@ from peft.tuners.lora import LoraLayer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 from src.gen_callback import GenerationCallback
 from src.collation import CollatedData, DataInstance
+from src.truncation_side import truncation_side
 
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -420,20 +421,6 @@ def smart_tokenizer_and_embedding_resize(
 
         input_embeddings[-num_new_tokens:] = input_embeddings_avg
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
-
-@dataclass
-class truncation_side(ContextDecorator):
-    tokenizer: transformers.PreTrainedTokenizer
-    truncation_side: str
-    orig_truncation_side: Optional[str] = None
-
-    def __enter__(self):
-        self.orig_truncation_side = self.tokenizer.truncation_side
-        return self
-
-    def __exit__(self, *exc):
-        self.tokenizer.truncation_side = self.orig_truncation_side
-        return False
 
 @dataclass
 class DataCollatorForCausalLM(object):
@@ -863,8 +850,13 @@ def train():
             model=model,
             tokenizer=tokenizer,
             dataset=data_module['eval_dataset'],
-            collator=data_module['data_collator'],
+            # collator=data_module['data_collator'],
             generation_config=training_args.generation_config,
+            source_max_len=args.source_max_len,
+            target_max_len=args.target_max_len,
+            truncate_toward_center=args.truncate_toward_center,
+            use_bos_token_in_prompt=args.use_bos_token_in_prompt,
+            report_to_wandb=training_args.report_to and 'wandb' in training_args.report_to,
         )
         callbacks.append(gen_callback)
     trainer = Seq2SeqTrainer(
