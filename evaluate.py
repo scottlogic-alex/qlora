@@ -148,6 +148,10 @@ class MiscArguments:
     default=True,
     metadata={"help": "Reset seed before each user input"}
   )
+  show_seed: bool = field(
+    default=True,
+    metadata={"help": "Show seed in prompt"}
+  )
   measure_perf: bool = field(
     default=True,
     metadata={"help": "Print inference speed"}
@@ -318,7 +322,6 @@ def main():
   blue_ansi='\x1b[31;34m'
   green_ansi='\x1b[31;32m'
   purple_ansi='\x1b[31;35m'
-  prompt=f'{purple_ansi}$ '
 
   participant_names: Dict[Participant, str] = {
     Participant.User: 'Instruction',
@@ -330,21 +333,40 @@ def main():
     if participant is Participant.System:
       return message
     return f'### {participant_names[participant]}:\n{message}'
+  
+  next_seed: Optional[int] = None
 
   first = True
   while True:
+    seed: int = misc_args.seed if next_seed is None else next_seed
+    if misc_args.reseed_each_prompt or first or next_seed is not None:
+      set_seed(seed)
+
     try:
+      prompt_ctx: str = f'[seed={seed}]' if misc_args.show_seed else ''
       if first and misc_args.initial_input is not None:
         user_input = misc_args.initial_input
-        print(f'{purple_ansi}{user_input}')
+        quote: str = f'{purple_ansi}{prompt_ctx}> '
+        print(f'{quote}{user_input}')
       else:
+        prompt: str = f'{purple_ansi}{prompt_ctx}$ '
         user_input = input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
     except KeyboardInterrupt:
       sys.exit(0)
     print(reset_ansi, end='')
 
-    if misc_args.reseed_each_prompt or first:
-      set_seed(misc_args.seed)
+    # you can 
+    if user_input.startswith('!'):
+      command, *rest = user_input[1:].split(' ')
+      match command:
+        case 'seed':
+          assert len(rest) == 1, '"seed" command only takes one operand'
+          operand, *_ = rest
+          next_seed = int(operand)
+          continue
+        case _:
+          raise ValueError(f'Command "{command}" not recognised. Recognised commands: seed')
+
     first = False
   
     match misc_args.prompt_style:
@@ -414,23 +436,22 @@ def main():
         stopping_criteria=stopping_criteria,
         streamer=streamer,
       )
+      # reset ANSI control sequence (plus line break)
+      print(reset_ansi)
       # if you wanted to see the result, you can do so like this:
       # decode: List[str] = tokenizer.decode(prediction[0,tokenized_prompts.input_ids.size(-1):], skip_special_tokens=False, clean_up_tokenization_spaces=True)
       # print(decode)
       # pass
       # but we're already streaming it to the console via our callback
+      inference_duration: float = perf_counter()-inference_start
+      token_in_count: int = tokenized_prompts.input_ids.size(-1)
+      token_out_count: int = prediction.size(-1) - token_in_count
+      tokens_out_per_sec: float = token_out_count/inference_duration
+      if misc_args.measure_perf:
+        print(f'{cyan_ansi}ctx length: {token_in_count}\ntokens out: {token_out_count}\nduration: {inference_duration:.2f} secs\nspeed: {tokens_out_per_sec:.2f} tokens/sec{reset_ansi}')
     except (KeyboardInterrupt, SufficientResponse):
-      pass
-    inference_duration: float = perf_counter()-inference_start
-    token_in_count: int = tokenized_prompts.input_ids.size(-1)
-    token_out_count: int = prediction.size(-1) - token_in_count
-    tokens_out_per_sec: float = token_out_count/inference_duration
-
-    # reset ANSI control sequence (plus line break)
-    print(reset_ansi)
-
-    if misc_args.measure_perf:
-      print(f'{cyan_ansi}ctx length: {token_in_count}\ntokens out: {token_out_count}\nduration: {inference_duration:.2f} secs\nspeed: {tokens_out_per_sec:.2f} tokens/sec{reset_ansi}')
+      # reset ANSI control sequence (plus line break)
+      print(reset_ansi)
 
     if misc_args.chat_memory:
       history += [Message(Participant.Assistant, response)]
