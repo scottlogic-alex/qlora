@@ -8,7 +8,7 @@ import os
 from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
-from typing import Optional, Dict, Sequence
+from typing import Optional, Dict, Sequence, TypedDict
 import numpy as np
 from tqdm import tqdm
 import logging
@@ -453,7 +453,13 @@ PROMPT_DICT = {
     ),
 }
 
-def extract_alpaca_dataset(example):
+class AlpacaDatum(TypedDict):
+    instruction: str
+    output: str
+    text: str
+    input: str
+
+def extract_alpaca_dataset(example: AlpacaDatum):
     if example.get("input", "") != "":
         prompt_format = PROMPT_DICT["prompt_input"]
     else:
@@ -468,6 +474,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
     Available datasets to be selected with `dataset` argument:
         - alpaca, 52002 examples
         - alpaca cleaned, 51942 examples   
+        - finance-alpaca, 69000 examples
         - chip2 (OIG), 210289 examples
         - self-instruct, 82612 examples
         - hh-rlhf (Anthropic), 160800 examples
@@ -490,6 +497,9 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
     # Alpaca
     if args.dataset == 'alpaca':
         dataset = load_dataset("tatsu-lab/alpaca")
+        dataset = dataset.map(extract_alpaca_dataset, remove_columns=['instruction'])
+    elif args.dataset == 'finance-alpaca':
+        dataset = load_dataset("gbharti/finance-alpaca")
         dataset = dataset.map(extract_alpaca_dataset, remove_columns=['instruction'])
     # Alpaca clean
     elif args.dataset == 'alpaca-clean':
