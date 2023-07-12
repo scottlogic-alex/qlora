@@ -4,7 +4,6 @@ import torch
 from torch import LongTensor, FloatTensor
 from torch.nn import Embedding
 from transformers import (
-  AddedToken,
   AutoConfig,
   AutoModelForCausalLM,
   AutoTokenizer,
@@ -12,8 +11,6 @@ from transformers import (
   GenerationConfig,
   HfArgumentParser,
   set_seed,
-  PreTrainedTokenizer,
-  PreTrainedModel,
   StoppingCriteriaList,
   LlamaForCausalLM,
   LlamaTokenizer,
