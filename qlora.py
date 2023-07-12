@@ -861,9 +861,10 @@ def train():
         assert args.dataset_format == 'prm800k-solutions', 'in-run continuation of representative prompts is only implemented for prm800k-solutions dataset_format'
         gen_callback = GenerationCallback(
             model=model,
-            # tokenizer=tokenizer,
-            dataset=data_module['test'],
+            tokenizer=tokenizer,
+            dataset=data_module['eval_dataset'],
             collator=data_module['data_collator'],
+            generation_config=training_args.generation_config,
         )
         callbacks.append(gen_callback)
     trainer = Seq2SeqTrainer(
