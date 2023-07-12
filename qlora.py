@@ -20,6 +20,7 @@ import transformers
 from torch import LongTensor, FloatTensor
 from torch.nn import Embedding, Linear
 from contextlib import nullcontext
+from torch.nn.functional import pad
 from torch.nn.utils.rnn import pad_sequence
 import argparse
 from transformers import (
@@ -232,6 +233,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     save_total_limit: int = field(default=40, metadata={"help": 'How many checkpoints to save before the oldest is overwritten'})
     save_safetensors: bool = field(default=False)
     torch_compile: bool = field(default=False)
+    simulate_worst_case_seq_len: bool = field(default=False, metadata={"help": "pad prompts to maximum size, to help you measure the worst-case memory usage you'll experience in your dataset."})
     metric_for_best_model: Optional[str] = field(default=None)
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
     generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
@@ -469,6 +471,7 @@ class DataCollatorForCausalLM(object):
     predict_with_generate: bool
     truncate_toward_center: bool
     use_bos_token_in_prompt: bool
+    simulate_worst_case_seq_len: bool
 
     def __call__(self, instances: Sequence[DataInstance]) -> CollatedData:
         # Extract elements
@@ -497,11 +500,27 @@ class DataCollatorForCausalLM(object):
             tokenized_targets['input_ids']
         ):
             if not self.predict_with_generate:
-                input_ids.append(torch.tensor(tokenized_source + tokenized_target))
-                if not self.train_on_source:
-                    labels.append(
-                        torch.tensor([IGNORE_INDEX for _ in range(len(tokenized_source))] + copy.deepcopy(tokenized_target))
+                prompt_and_continuation: LongTensor = torch.tensor(tokenized_source + tokenized_target)
+                # simulate worst-case sequence length
+                if self.simulate_worst_case_seq_len:
+                    prompt_and_continuation = pad(
+                        prompt_and_continuation,
+                        (0, (self.source_max_len + self.target_max_len) - (len(tokenized_source) + len(tokenized_target))),
+                        mode='constant',
+                        value=self.tokenizer.pad_token_id,
                     )
+                input_ids.append(prompt_and_continuation)
+                if not self.train_on_source:
+                    source_ignored: LongTensor = torch.tensor([IGNORE_INDEX for _ in range(len(tokenized_source))] + copy.deepcopy(tokenized_target))
+                    # simulate worst-case sequence length
+                    if self.simulate_worst_case_seq_len:
+                        source_ignored = pad(
+                            source_ignored,
+                            (0, (self.source_max_len + self.target_max_len) - (len(tokenized_source) + len(tokenized_target))),
+                            mode='constant',
+                            value=self.tokenizer.pad_token_id,
+                        )
+                    labels.append(source_ignored)
                 else:
                     labels.append(torch.tensor(copy.deepcopy(tokenized_source + tokenized_target)))
             else:
@@ -633,7 +652,7 @@ def local_dataset(dataset_name):
     split_dataset = full_dataset.train_test_split(test_size=0.1)
     return split_dataset
 
-def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
+def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args: argparse.Namespace) -> Dict:
     """
     Make dataset and collator for supervised fine-tuning.
     Datasets are expected to have the following columns: { `input`, `output` }
@@ -766,6 +785,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         predict_with_generate=args.predict_with_generate,
         truncate_toward_center=args.truncate_toward_center,
         use_bos_token_in_prompt=args.use_bos_token_in_prompt,
+        simulate_worst_case_seq_len=args.simulate_worst_case_seq_len,
     )
     return dict(
         train_dataset=train_dataset if args.do_train else None,
