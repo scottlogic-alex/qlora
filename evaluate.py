@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, TypedDict, NamedTuple, List, Dict
 import torch
-from torch import LongTensor
+from torch import LongTensor, FloatTensor
+from torch.nn import Embedding
 from transformers import (
   AddedToken,
   AutoConfig,
@@ -22,9 +23,11 @@ from peft import PeftModel, PeftModelForCausalLM
 import logging
 from enum import Enum
 import sys
+from os.path import splitext
 
 from transformers import AutoTokenizer
-from typing import Optional, Union
+from safetensors.torch import load_file
+from typing import Optional, Union, OrderedDict
 
 from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from src.stop_on_tokens import StopOnTokens
@@ -70,6 +73,10 @@ class ModelArguments:
   )
   lora_model_name_or_path: Optional[str] = field(
     default="tloen/alpaca-lora-7b"
+  )
+  embedding_path: Optional[str] = field(
+    default=None,
+    metadata={"help": "Pickle file containing the model's embedding layer. i.e. the embed_tokens.pt which qlora.py will save out, if you retrained the embedding (the embedding layer becomes unfrozen if you expand its vocabulary)."}
   )
   trust_remote_code: Optional[bool] = field(
     default=False,
@@ -245,6 +252,7 @@ def main():
   if model_args.register_process_supervision_tokens:
     special_tokens['additional_special_tokens'] = list(process_supervision_tokens.values())
   if special_tokens:
+    assert model_args.embedding_path is not None, "If you're resizing the embedding layer, you will want to replace its weights with the embed_tokens.pt that qlora.py saved during training"
     smart_tokenizer_and_embedding_resize(
       special_tokens_dict=special_tokens,
       tokenizer=tokenizer,
@@ -276,6 +284,19 @@ def main():
     model,
     model_args.lora_model_name_or_path,
   ).eval()
+
+  if model_args.embedding_path is not None:
+    _, extension = splitext(model_args.embedding_path)
+    if extension == '.pt':
+      state_dict: OrderedDict[str, FloatTensor] = torch.load(model_args.embedding_path, map_location=model.device, weights_only=True)
+    else:
+      assert extension == '.safetensors', "only .pt and .safetensors embeddings state dict files are supported"
+      state_dict: OrderedDict[str, FloatTensor] = load_file(model_args.embedding_path, device=model.device)
+    embedding: Embedding = model.get_input_embeddings()
+    orig_device, orig_dtype = embedding.weight.device, embedding.weight.dtype
+    assert embedding.weight.shape == state_dict['weight'].shape, f"the embedding weights in the saved state dict are a different shape ({state_dict['weight'].shape}) than the resized embedding we computed ({embedding.weight.shape}). this could indicate that your options such as --register_process_supervision_tokens do not match those used during training."
+    embedding.load_state_dict(state_dict)
+    embedding.weight.to(device=orig_device, dtype=orig_dtype)
 
   set_seed(misc_args.seed)
   if misc_args.compile:
