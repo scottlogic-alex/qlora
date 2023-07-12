@@ -69,7 +69,8 @@ class ModelArguments:
     metadata={"help": "If you are a evaluating a LoRA of a LoRA (for example you have finetuned Alpaca): you can specify 'tloen/alpaca-lora-7b' here, then specify your downstream LoRA at via --lora_model_name_or_path."}
   )
   lora_model_name_or_path: Optional[str] = field(
-    default="tloen/alpaca-lora-7b"
+    default=None,
+    metadata={"help": "Example: tloen/alpaca-lora-7b. Apply this over the model (after applying base_lora_model_name_or_path, if specified)"}
   )
   input_embedding_path: Optional[str] = field(
     default=None,
@@ -235,11 +236,12 @@ def main():
       model_args.base_lora_model_name_or_path,
     ).eval()
 
-  print(f'Applying LoRA {model_args.lora_model_name_or_path}.')
-  model: PeftModelForCausalLM = PeftModel.from_pretrained(
-    model,
-    model_args.lora_model_name_or_path,
-  ).eval()
+  if model_args.lora_model_name_or_path is not None:
+    print(f'Applying LoRA {model_args.lora_model_name_or_path}.')
+    model: PeftModelForCausalLM = PeftModel.from_pretrained(
+      model,
+      model_args.lora_model_name_or_path,
+    ).eval()
 
   if model_args.input_embedding_path is None:
     assert model.get_input_embeddings().weight.shape[0] == len(tokenizer), f"must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {model.get_input_embeddings().weight.shape[0]} embeddings."
