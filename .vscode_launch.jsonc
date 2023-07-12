@@ -173,13 +173,16 @@
       "args": [
         "--model_name_or_path", "huggyllama/llama-13b",
         "--base_lora_model_name_or_path", "chansung/alpaca-lora-13b",
-        "--tokenizer_model_name_or_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664",
-        "--lora_model_name_or_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664/adapter_model",
-        "--input_embedding_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664/embed_tokens.pt",
-        "--output_embedding_path", "/home/birch/git/qlora/output_13b_alpaca_special/checkpoint-1664/lm_head.pt",
+        "--tokenizer_model_name_or_path", "Birchlabs/llama-13b-stepwise-tokenizer",
+        "--lora_model_name_or_path", "Birchlabs/llama-13b-stepwise-adapter",
+        // you'll want to download embed_tokens.pt and lm_head.pt from
+        // https://huggingface.co/Birchlabs/llama-13b-stepwise-embeddings/tree/main
+        // and place them at the root of the repository
+        "--input_embedding_path", "embed_tokens.pt",
+        "--output_embedding_path", "lm_head.pt",
         "--use_bos_token_in_prompt",
         "--bf16",
-        "--overrun_countermeasures", "False",
+        "--overrun_countermeasures", "False"
       ]
     },
     {
