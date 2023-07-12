@@ -160,6 +160,9 @@ class MiscArguments:
     default=True,
     metadata={"help": "Detect when bot is about to start talking to itself; end the generation before that happens. The bot is *supposed* to emit an end-of-sentence token to indicate that it's finished its reply, but neglects to do so in longer conversations, continuing to sequence-complete both sides of the conversation. Hence this countermeasure tries to detect and prevent that."}
   )
+  tokenizer_cache_dir: Optional[str] = field(
+    default=None
+  )
 
 @dataclass
 class GenerationArguments:
@@ -242,9 +245,14 @@ def main():
 
   model: LlamaForCausalLM = get_model(model_args)
 
-  tokenizer: LlamaTokenizerFast = AutoTokenizer.from_pretrained(model_args.tokenizer_model_name_or_path or model_args.model_name_or_path)
+  tokenizer: LlamaTokenizerFast = AutoTokenizer.from_pretrained(
+    model_args.tokenizer_model_name_or_path or model_args.model_name_or_path,
+    cache_dir=misc_args.tokenizer_cache_dir,
+    use_fast = False,
+    tokenizer_type='llama' if 'llama' in (model_args.tokenizer_model_name_or_path or model_args.model_name_or_path) else None, # Needed for HF name change
+  )
   if model_args.use_bos_token_in_prompt and tokenizer._bos_token is None:
-      assert model_args.register_bos_token, "You have required (via --use_bos_token_in_prompt) that BOS token be used in prompt, but this tokenizer doesn't have one. you should either register a BOS token via --register_bos_token, or (preferably) avoid using --use_bos_token_in_prompt, as the model was not pretrained to park attention on BOS when there's nothing to attend to."
+    assert model_args.register_bos_token, "You have required (via --use_bos_token_in_prompt) that BOS token be used in prompt, but this tokenizer doesn't have one. you should either register a BOS token via --register_bos_token, or (preferably) avoid using --use_bos_token_in_prompt, as the model was not pretrained to park attention on BOS when there's nothing to attend to."
   special_tokens: Dict[str, str] = {}
   if tokenizer._pad_token is None:
     special_tokens['pad_token'] = DEFAULT_PAD_TOKEN
@@ -314,11 +322,11 @@ def main():
     print(reset_ansi, end='')
 
     first = False
-    history += [Message(Participant.User, user_input)]
   
     chat_to_complete: str = '\n\n'.join([
       format_message(message) for message in [
         *history,
+        Message(Participant.User, user_input),
         Message(Participant.Assistant, ''),
       ]
     ])
@@ -362,7 +370,7 @@ def main():
         response += message
         print(message, end='', flush=True)
 
-    streamer = CallbackTextIteratorStreamer(tokenizer, callback=on_text, skip_prompt=True, skip_special_tokens=True)
+    streamer = CallbackTextIteratorStreamer(tokenizer, callback=on_text, skip_prompt=True, skip_special_tokens=False)
 
     try:
       prediction: LongTensor = model.generate(
@@ -382,9 +390,8 @@ def main():
     # reset ANSI control sequence (plus line break)
     print(reset_ansi)
 
-    # TODO: cull older history, otherwise context will just keep growing larger.
-    #       ideally by measuring each message to work out the smallest cull possible.
-    history += [Message(Participant.Assistant, response)]
+    # don't add to history. this is an instruction-response model, not a chatbot
+    # history += [Message(Participant.Assistant, response)]
 
 if __name__ == "__main__":
   main()
