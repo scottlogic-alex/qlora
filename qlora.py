@@ -143,6 +143,10 @@ class DataArguments:
         default=False,
         metadata={"help": "Register tokens for process supervision prompt template such as <|start_step|>, <|end_step|>"}
     )
+    use_bos_token_in_prompt: Optional[bool] = field(
+        default=False,
+        metadata={"help": "If your model was pretrained to utilise BOS (e.g. LLaMA), then make use of it in prompt."}
+    )
     register_bos_token: Optional[bool] = field(
         default=False,
         metadata={"help": "GPTNeoXTokenizer doesn't have a true BOS token registered. Register one."}
@@ -384,10 +388,12 @@ def get_accelerate_model(args, checkpoint_dir):
         assert args.register_process_supervision_tokens, 'prm800k-solutions dataset_format requires tokenizer to support process supervision special tokens. enable --register_process_supervision_tokens.'
         if 'pythia' in args.model_name_or_path:
             assert args.register_bos_token, "GPTNeoXTokenizer doesn't have a legitimate BOS token, but prm800k-solutions dataset_format makes use of BOS in its prompt template. enable --register_bos_token"
+    if args.use_bos_token_in_prompt and tokenizer._bos_token is None:
+        assert args.register_bos_token, "You have required (via --use_bos_token_in_prompt) that BOS token be used in prompt, but this tokenizer doesn't have one. you should either register a BOS token via --register_bos_token, or (preferably) avoid using --use_bos_token_in_prompt, as the model was not pretrained to park attention on BOS when there's nothing to attend to. well, if you finetune it enough perhaps you'd get away with it."
     special_tokens: Dict[str, str] = {}
     if tokenizer._pad_token is None:
         special_tokens['pad_token'] = DEFAULT_PAD_TOKEN
-    if args.register_bos_token:
+    if tokenizer._bos_token is None and args.register_bos_token:
         special_tokens['bos_token'] = DEFAULT_BOS_TOKEN
     if args.register_process_supervision_tokens:
         special_tokens['additional_special_tokens'] = list(process_supervision_tokens.values())
@@ -509,10 +515,11 @@ class DataCollatorForCausalLM(object):
     train_on_source: bool
     predict_with_generate: bool
     truncate_toward_center: bool
+    use_bos_token_in_prompt: bool
 
     def __call__(self, instances: Sequence[Dict]) -> CollatedData:
         # Extract elements
-        sources: List[str] = [f"{self.tokenizer.bos_token}{example['input']}" for example in instances]
+        sources: List[str] = [f"{self.tokenizer.bos_token if self.use_bos_token_in_prompt else ''}{example['input']}" for example in instances]
         targets: List[str] = [f"{example['output']}{self.tokenizer.eos_token}" for example in instances]
         # Tokenize
         with truncation_side(self.tokenizer, 'left') if self.truncate_toward_center else nullcontext():
@@ -801,6 +808,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         train_on_source=args.train_on_source,
         predict_with_generate=args.predict_with_generate,
         truncate_toward_center=args.truncate_toward_center,
+        use_bos_token_in_prompt=args.use_bos_token_in_prompt,
     )
     return dict(
         train_dataset=train_dataset if args.do_train else None,
