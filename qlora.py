@@ -9,6 +9,10 @@ from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
 from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union
+if sys.version_info < (3, 11):
+    from typing_extensions import NotRequired
+else:
+    from typing import NotRequired
 import numpy as np
 from tqdm import tqdm
 import logging
@@ -17,11 +21,13 @@ import pandas as pd
 
 import torch
 import transformers
+from torch import LongTensor, BoolTensor
 from torch.nn.utils.rnn import pad_sequence
 import argparse
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
+    BatchEncoding,
     set_seed,
     Seq2SeqTrainer,
     BitsAndBytesConfig,
@@ -389,6 +395,11 @@ def smart_tokenizer_and_embedding_resize(
         input_embeddings[-num_new_tokens:] = input_embeddings_avg
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
+class CollatedData(TypedDict):
+    input_ids: LongTensor
+    attention_mask: BoolTensor
+    labels: NotRequired[LongTensor]
+
 @dataclass
 class DataCollatorForCausalLM(object):
     tokenizer: transformers.PreTrainedTokenizer
@@ -397,26 +408,26 @@ class DataCollatorForCausalLM(object):
     train_on_source: bool
     predict_with_generate: bool
 
-    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
+    def __call__(self, instances: Sequence[Dict]) -> CollatedData:
         # Extract elements
-        sources = [f"{self.tokenizer.bos_token}{example['input']}" for example in instances]
-        targets = [f"{example['output']}{self.tokenizer.eos_token}" for example in instances]
+        sources: List[str] = [f"{self.tokenizer.bos_token}{example['input']}" for example in instances]
+        targets: List[str] = [f"{example['output']}{self.tokenizer.eos_token}" for example in instances]
         # Tokenize
-        tokenized_sources_with_prompt = self.tokenizer(
+        tokenized_sources_with_prompt: BatchEncoding = self.tokenizer(
             sources,
             max_length=self.source_max_len,
             truncation=True,
             add_special_tokens=False,
         )
-        tokenized_targets = self.tokenizer(
+        tokenized_targets: BatchEncoding = self.tokenizer(
             targets,
             max_length=self.target_max_len,
             truncation=True,
             add_special_tokens=False,
         )
         # Build the input and labels for causal LM
-        input_ids = []
-        labels = []
+        input_ids: List[LongTensor] = []
+        labels: List[LongTensor] = []
         for tokenized_source, tokenized_target in zip(
             tokenized_sources_with_prompt['input_ids'],
             tokenized_targets['input_ids']
@@ -432,9 +443,9 @@ class DataCollatorForCausalLM(object):
             else:
                 input_ids.append(torch.tensor(tokenized_source))
         # Apply padding
-        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) if not self.predict_with_generate else None
-        data_dict = {
+        input_ids: LongTensor = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        labels: Optional[LongTensor] = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) if not self.predict_with_generate else None
+        data_dict: CollatedData = {
             'input_ids': input_ids,
             'attention_mask':input_ids.ne(self.tokenizer.pad_token_id),
         }
