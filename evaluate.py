@@ -333,7 +333,8 @@ def main():
         Message(Participant.Assistant, process_supervision_tokens['step_start']),
       ]
     ])
-    chat_to_complete: str = f'{tokenizer.bos_token}{chat_to_complete}'
+    if model_args.use_bos_token_in_prompt:
+      chat_to_complete: str = f'{tokenizer.bos_token}{chat_to_complete}'
 
     tokenized_prompts: TokenizerOutput = tokenizer([chat_to_complete], return_tensors='pt', truncation=True)
     
