@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional, TypedDict, NamedTuple, List, Dict
 import torch
 from torch import LongTensor, FloatTensor
-from torch.nn import Embedding
+from torch.nn import Embedding, Linear
 from transformers import (
   AutoConfig,
   AutoModelForCausalLM,
@@ -71,9 +71,13 @@ class ModelArguments:
   lora_model_name_or_path: Optional[str] = field(
     default="tloen/alpaca-lora-7b"
   )
-  embedding_path: Optional[str] = field(
+  input_embedding_path: Optional[str] = field(
     default=None,
-    metadata={"help": "Pickle file containing the model's embedding layer. i.e. the embed_tokens.pt which qlora.py will save out, if you retrained the embedding (the embedding layer becomes unfrozen if you expand its vocabulary)."}
+    metadata={"help": "Pickle file containing the model's input embedding layer. i.e. the embed_tokens.pt which qlora.py will save out, if you retrained the embedding (the embedding layer becomes unfrozen if you expand its vocabulary)."}
+  )
+  output_embedding_path: Optional[str] = field(
+    default=None,
+    metadata={"help": "Pickle file containing the model's output embedding layer. i.e. the lm_head.pt which qlora.py will save out, if you retrained the lm_head (the lm_head becomes unfrozen if you expand its vocabulary)."}
   )
   trust_remote_code: Optional[bool] = field(
     default=False,
@@ -237,24 +241,39 @@ def main():
     model_args.lora_model_name_or_path,
   ).eval()
 
-  if model_args.embedding_path is None:
+  if model_args.input_embedding_path is None:
     assert model.get_input_embeddings().weight.shape[0] == len(tokenizer), f"must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {model.get_input_embeddings().weight.shape[0]} embeddings."
   else:
-    print(f'Applying finetuned token embedding weights from {model_args.embedding_path}.')
-    _, extension = splitext(model_args.embedding_path)
+    print(f'Applying finetuned input embedding weights from {model_args.input_embedding_path}.')
+    _, extension = splitext(model_args.input_embedding_path)
     if extension == '.pt':
-      state_dict: OrderedDict[str, FloatTensor] = torch.load(model_args.embedding_path, map_location=model.device, weights_only=True)
+      input_embed_state_dict: OrderedDict[str, FloatTensor] = torch.load(model_args.input_embedding_path, map_location=model.device, weights_only=True)
     else:
       assert extension == '.safetensors', "only .pt and .safetensors embeddings state dict files are supported"
-      state_dict: OrderedDict[str, FloatTensor] = load_file(model_args.embedding_path, device=model.device)
-    embedding: Embedding = model.get_input_embeddings()
-    orig_device, orig_dtype = embedding.weight.device, embedding.weight.dtype
+      input_embed_state_dict: OrderedDict[str, FloatTensor] = load_file(model_args.input_embedding_path, device=model.device)
+    embed_tokens: Embedding = model.get_input_embeddings()
+    orig_device, orig_dtype = embed_tokens.weight.device, embed_tokens.weight.dtype
 
-    assert state_dict['weight'].shape[0] == len(tokenizer), f"embeddings state dict must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {state_dict['weight'].shape[0]} embeddings."
-    embedding: Embedding = model.resize_token_embeddings(len(tokenizer))
+    assert input_embed_state_dict['weight'].shape[0] == len(tokenizer), f"embeddings state dict must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {input_embed_state_dict['weight'].shape[0]} embeddings."
+    embed_tokens: Embedding = model.resize_token_embeddings(len(tokenizer))
 
-    embedding.load_state_dict(state_dict)
-    embedding.weight.to(device=orig_device, dtype=orig_dtype)
+    embed_tokens.load_state_dict(input_embed_state_dict)
+    embed_tokens.weight.to(device=orig_device, dtype=orig_dtype)
+
+  if model_args.output_embedding_path is not None:
+    print(f'Applying finetuned output embedding weights from {model_args.output_embedding_path}.')
+    _, extension = splitext(model_args.output_embedding_path)
+    if extension == '.pt':
+      lm_head_state_dict: OrderedDict[str, FloatTensor] = torch.load(model_args.output_embedding_path, map_location=model.device, weights_only=True)
+    else:
+      assert extension == '.safetensors', "only .pt and .safetensors embeddings state dict files are supported"
+      lm_head_state_dict: OrderedDict[str, FloatTensor] = load_file(model_args.output_embedding_path, device=model.device)
+    lm_head: Optional[Linear] = model.get_output_embeddings()
+    assert lm_head is not None, "if you are finetuning the lm_head, it'd be weird to find that the base model didn't have one at all"
+    orig_device, orig_dtype = lm_head.weight.device, lm_head.weight.dtype
+
+    lm_head.load_state_dict(lm_head_state_dict)
+    lm_head.weight.to(device=orig_device, dtype=orig_dtype)
 
   set_seed(misc_args.seed)
   if misc_args.compile:
