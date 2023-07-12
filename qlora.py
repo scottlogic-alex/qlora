@@ -18,7 +18,7 @@ import pandas as pd
 import torch
 import transformers
 from torch import LongTensor, FloatTensor
-from torch.nn import Embedding
+from torch.nn import Embedding, Linear
 from contextlib import nullcontext
 from torch.nn.utils.rnn import pad_sequence
 import argparse
@@ -293,13 +293,21 @@ class SavePeftModelCallback(transformers.TrainerCallback):
         peft_model_path = os.path.join(checkpoint_folder, "adapter_model")
         kwargs["model"].save_pretrained(peft_model_path)
 
-        embedding: Embedding = kwargs["model"].get_input_embeddings()
-        if any(map(lambda p: p.requires_grad, embedding.parameters())):
-            state_dict: OrderedDict[str, FloatTensor] = embedding.state_dict()
+        input_embedding: Embedding = kwargs["model"].get_input_embeddings()
+        if any(map(lambda p: p.requires_grad, input_embedding.parameters())):
+            state_dict: OrderedDict[str, FloatTensor] = input_embedding.state_dict()
             if args.save_safetensors:
                 save_file(state_dict, os.path.join(checkpoint_folder, "embed_tokens.safetensors"))
             else:
                 torch.save(state_dict, os.path.join(checkpoint_folder, "embed_tokens.pt"))
+        
+        lm_head: Linear = kwargs["model"].get_output_embeddings()
+        if any(map(lambda p: p.requires_grad, lm_head.parameters())):
+            state_dict: OrderedDict[str, FloatTensor] = lm_head.state_dict()
+            if args.save_safetensors:
+                save_file(state_dict, os.path.join(checkpoint_folder, "lm_head.safetensors"))
+            else:
+                torch.save(state_dict, os.path.join(checkpoint_folder, "lm_head.pt"))
 
         pytorch_model_path = os.path.join(checkpoint_folder, "pytorch_model.bin")
         if os.path.exists(pytorch_model_path):
