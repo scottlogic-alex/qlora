@@ -832,12 +832,12 @@ def train():
                 ),
         })
     data_module = make_data_module(tokenizer=tokenizer, args=args)
-    if args.report_to == 'wandb':
+    if training_args.report_to and 'wandb' in training_args.report_to:
         import wandb
         wandb.init(
             entity='scottlogic',
             project='llm-stepwise',
-            name='llama7b-bsz1',
+            name=f'llama7b-bsz{training_args.per_device_train_batch_size}-bit{training_args.bits}',
             config={
                 "batch_size": training_args.per_device_train_batch_size,
                 "learning_rate": training_args.learning_rate,
