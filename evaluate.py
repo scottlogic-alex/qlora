@@ -274,7 +274,13 @@ def main():
     ).eval()
 
   if model_args.input_embedding_path is None:
-    assert model.get_input_embeddings().weight.shape[0] == len(tokenizer), f"must have an embedding per token in the tokenizer. tokenizer had {len(tokenizer)} tokens, embedding had {model.get_input_embeddings().weight.shape[0]} embeddings."
+    learned_embed_count: int = model.get_input_embeddings().weight.shape[0]
+    recognised_vocab_count: int = len(tokenizer)
+    vocab_difference: int = recognised_vocab_count - learned_embed_count
+    if vocab_difference == 1 and next(iter(tokenizer.get_added_vocab().values())) == tokenizer.pad_token_id:
+      logger.info("Tokenizer knows more tokens than the model has learned embeddings for, but the difference is just an unlearned PAD token. So long as we stick to batches-of-1 or mask out the padding: we should be fine.")
+    elif vocab_difference != 0:
+      raise ValueError(f"must have an embedding per token in the tokenizer. tokenizer had {recognised_vocab_count} tokens, embedding had {learned_embed_count} embeddings.")
   else:
     print(f'Applying finetuned input embedding weights from {model_args.input_embedding_path}.')
     _, extension = splitext(model_args.input_embedding_path)
