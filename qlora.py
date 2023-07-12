@@ -785,7 +785,7 @@ def train():
         args.model_name_or_path,
         cache_dir=args.cache_dir,
         padding_side="right",
-        use_fast='pythia' in args.model_name_or_path, # Fast tokenizer giving issues.
+        use_fast='pythia' in args.model_name_or_path or 'mpt' in args.model_name_or_path, # Fast tokenizer giving issues.
         tokenizer_type='llama' if 'llama' in args.model_name_or_path else None, # Needed for HF name change
         use_auth_token=args.use_auth_token,
     )
