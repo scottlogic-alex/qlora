@@ -8,7 +8,7 @@ import os
 from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
-from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union
+from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union, Literal
 if sys.version_info < (3, 11):
     from typing_extensions import NotRequired
 else:
@@ -131,6 +131,7 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.Seq2SeqTrainingArguments):
+    # https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments
     cache_dir: Optional[str] = field(
         default=None
     )
@@ -201,6 +202,9 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     output_dir: str = field(default='./output', metadata={"help": 'The output dir for logs and checkpoints'})
     optim: str = field(default='paged_adamw_32bit', metadata={"help": 'The optimizer to be used'})
     per_device_train_batch_size: int = field(default=1, metadata={"help": 'The training batch size per GPU. Increase for better speed.'})
+    per_device_eval_batch_size: int = field(default=1, metadata={"help": 'The eval batch size per GPU. Increase for better speed.'})
+    evaluation_strategy: Literal['no', 'steps', 'epoch'] = field(default='no')
+    eval_steps: Optional[int] = field(default=None)
     gradient_accumulation_steps: int = field(default=16, metadata={"help": 'How many gradients to accumulate before to perform an optimizer step'})
     max_steps: int = field(default=10000, metadata={"help": 'How many optimizer update steps to take'})
     weight_decay: float = field(default=0.0, metadata={"help": 'The L2 weight decay rate of AdamW'}) # use lora dropout instead for regularization if needed
@@ -216,6 +220,10 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     save_strategy: str = field(default='steps', metadata={"help": 'When to save checkpoints'})
     save_steps: int = field(default=250, metadata={"help": 'How often to save a model'})
     save_total_limit: int = field(default=40, metadata={"help": 'How many checkpoints to save before the oldest is overwritten'})
+    save_safetensors: bool = field(default=False)
+    torch_compile: bool = field(default=False)
+    metric_for_best_model: Optional[str] = field(default=None)
+    torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
 
 @dataclass
 class GenerationArguments:
@@ -708,6 +716,8 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
     if args.do_eval or args.do_predict:
         if 'eval' in dataset:
             eval_dataset = dataset['eval']
+        elif 'test' in dataset:
+            eval_dataset = dataset['test']
         else:
             print('Splitting train dataset in train and validation according to `eval_dataset_size`')
             dataset = dataset["train"].train_test_split(
@@ -822,6 +832,35 @@ def train():
                 ),
         })
     data_module = make_data_module(tokenizer=tokenizer, args=args)
+    if args.report_to == 'wandb':
+        import wandb
+        wandb.init(
+            entity='scottlogic',
+            project='llm-stepwise',
+            name='llama7b-bsz1',
+            config={
+                "batch_size": training_args.per_device_train_batch_size,
+                "learning_rate": training_args.learning_rate,
+                "bits": training_args.bits,
+                "source_max_len": data_args.source_max_len,
+                "source_max_len": data_args.source_max_len,
+                "per_device_train_batch_size": training_args.per_device_train_batch_size,
+                "per_device_eval_batch_size": training_args.per_device_eval_batch_size,
+                "gradient_accumulation_steps": training_args.gradient_accumulation_steps,
+                "optim": training_args.optim,
+                "lora_r": training_args.lora_r,
+                "lora_alpha": training_args.lora_alpha,
+                "quant_type": training_args.quant_type,
+                "double_quant": training_args.double_quant,
+                "adam8bit": training_args.adam8bit,
+                "full_finetune": training_args.full_finetune,
+                "weight_decay": training_args.weight_decay,
+                "lr_scheduler_type": training_args.lr_scheduler_type,
+                "warmup_ratio": training_args.warmup_ratio,
+                "torch_compile": training_args.torch_compile,
+                "torch_compile_mode": training_args.torch_compile_mode,
+            }
+        )
     trainer = Seq2SeqTrainer(
         model=model,
         tokenizer=tokenizer,
