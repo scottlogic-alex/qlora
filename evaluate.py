@@ -61,7 +61,10 @@ def smart_tokenizer_and_embedding_resize(
 
   Note: This is the unoptimized version that may make your embedding size not be divisible by 64.
   """
-  num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
+  # num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
+
+  # should equal 5; [PAD], plus the four process_supervision_tokens, were added during our finetune
+  num_new_tokens = model.get_input_embeddings().num_embeddings - len(tokenizer)
   model.resize_token_embeddings(len(tokenizer))
 
   if num_new_tokens > 0:
