@@ -308,7 +308,12 @@ def main():
   first = True
   while True:
     try:
-      user_input = 'What is $\sqrt{53}$ in simplest radical form?' if first else input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
+      if first:
+        user_input = 'What is $\sqrt{53}$ in simplest radical form?'
+        print(f'{purple_ansi}{user_input}')
+      else:
+        # user_input = input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
+        user_input = input(prompt)
     except KeyboardInterrupt:
       sys.exit(0)
     print(reset_ansi, end='')
