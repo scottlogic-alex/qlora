@@ -64,6 +64,10 @@ class ModelArguments:
   tokenizer_model_name_or_path: Optional[str] = field(
     default="huggyllama/llama-7b"
   )
+  base_lora_model_name_or_path: Optional[str] = field(
+    default=None,
+    metadata={"help": "If you are a evaluating a LoRA of a LoRA (for example you have finetuned Alpaca): you can specify 'tloen/alpaca-lora-7b' here, then specify your downstream LoRA at via --lora_model_name_or_path."}
+  )
   lora_model_name_or_path: Optional[str] = field(
     default="tloen/alpaca-lora-7b"
   )
@@ -260,7 +264,14 @@ def main():
       ),
     })
 
-  print('Applying LoRA.')
+  if model_args.base_lora_model_name_or_path is not None:
+    print(f'Applying base LoRA {model_args.base_lora_model_name_or_path}.')
+    model: PeftModelForCausalLM = PeftModel.from_pretrained(
+      model,
+      model_args.base_lora_model_name_or_path,
+    ).eval()
+
+  print(f'Applying LoRA {model_args.lora_model_name_or_path}.')
   model: PeftModelForCausalLM = PeftModel.from_pretrained(
     model,
     model_args.lora_model_name_or_path,
@@ -297,7 +308,7 @@ def main():
   first = True
   while True:
     try:
-      user_input = input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
+      user_input = 'What is $\sqrt{53}$ in simplest radical form?' if first else input(f'{blue_ansi}Type a message to begin the conversation…{reset_ansi}\n{prompt}' if first else prompt)
     except KeyboardInterrupt:
       sys.exit(0)
     print(reset_ansi, end='')
@@ -365,7 +376,9 @@ def main():
         streamer=streamer,
       )
       # if you wanted to see the result, you can do so like this:
-      #   decode: List[str] = tokenizer.decode(prediction[0,tokenized_prompts.input_ids.size(-1):], skip_special_tokens=True, clean_up_tokenization_spaces=True)
+      # decode: List[str] = tokenizer.decode(prediction[0,tokenized_prompts.input_ids.size(-1):], skip_special_tokens=False, clean_up_tokenization_spaces=True)
+      # print(decode)
+      # pass
       # but we're already streaming it to the console via our callback
     except (KeyboardInterrupt, SufficientResponse):
       pass
