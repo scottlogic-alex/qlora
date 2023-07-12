@@ -22,6 +22,7 @@ import pandas as pd
 import torch
 import transformers
 from torch import LongTensor, BoolTensor
+from contextlib import ContextDecorator, nullcontext
 from torch.nn.utils.rnn import pad_sequence
 import argparse
 from transformers import (
@@ -395,6 +396,20 @@ def smart_tokenizer_and_embedding_resize(
         input_embeddings[-num_new_tokens:] = input_embeddings_avg
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
+@dataclass
+class truncation_side(ContextDecorator):
+    tokenizer: transformers.PreTrainedTokenizer
+    truncation_side: str
+    orig_truncation_side: Optional[str] = None
+
+    def __enter__(self):
+        self.orig_truncation_side = self.tokenizer.truncation_side
+        return self
+
+    def __exit__(self, *exc):
+        self.tokenizer.truncation_side = self.orig_truncation_side
+        return False
+
 class CollatedData(TypedDict):
     input_ids: LongTensor
     attention_mask: BoolTensor
@@ -407,24 +422,27 @@ class DataCollatorForCausalLM(object):
     target_max_len: int
     train_on_source: bool
     predict_with_generate: bool
+    truncate_toward_center: bool
 
     def __call__(self, instances: Sequence[Dict]) -> CollatedData:
         # Extract elements
         sources: List[str] = [f"{self.tokenizer.bos_token}{example['input']}" for example in instances]
         targets: List[str] = [f"{example['output']}{self.tokenizer.eos_token}" for example in instances]
         # Tokenize
-        tokenized_sources_with_prompt: BatchEncoding = self.tokenizer(
-            sources,
-            max_length=self.source_max_len,
-            truncation=True,
-            add_special_tokens=False,
-        )
-        tokenized_targets: BatchEncoding = self.tokenizer(
-            targets,
-            max_length=self.target_max_len,
-            truncation=True,
-            add_special_tokens=False,
-        )
+        with truncation_side(self.tokenizer, 'left') if self.truncate_toward_center else nullcontext():
+            tokenized_sources_with_prompt: BatchEncoding = self.tokenizer(
+                sources,
+                max_length=self.source_max_len,
+                truncation=True,
+                add_special_tokens=False,
+            )
+        with truncation_side(self.tokenizer, 'right') if self.truncate_toward_center else nullcontext():
+            tokenized_targets: BatchEncoding = self.tokenizer(
+                targets,
+                max_length=self.target_max_len,
+                truncation=True,
+                add_special_tokens=False,
+            )
         # Build the input and labels for causal LM
         input_ids: List[LongTensor] = []
         labels: List[LongTensor] = []
@@ -695,6 +713,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         target_max_len=args.target_max_len,
         train_on_source=args.train_on_source,
         predict_with_generate=args.predict_with_generate,
+        truncate_toward_center=args.dataset_format == 'prm800k-solutions',
     )
     return dict(
         train_dataset=train_dataset if args.do_train else None,
