@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN = "[PAD]"
+DEFAULT_BOS_TOKEN = "[BOS]"
 
 process_supervision_tokens: Dict[str, str] = {
     'step_start':   '<|step_start|>',
@@ -110,6 +111,18 @@ class DataArguments:
     dataset_format: Optional[str] = field(
         default=None,
         metadata={"help": "Which dataset format is used. [alpaca|chip2|self-instruct|hh-rlhf|prm800k-solutions]"}
+    )
+    register_process_supervision_tokens: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Register tokens for process supervision prompt template such as <|start_step|>, <|end_step|>"}
+    )
+    register_bos_token: Optional[bool] = field(
+        default=False,
+        metadata={"help": "GPTNeoXTokenizer doesn't have a true BOS token registered. Register one."}
+    )
+    truncate_toward_center: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Truncate prompt from left side, truncate continuation from right side."}
     )
 
 @dataclass
@@ -707,13 +720,16 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         if args.group_by_length:
             train_dataset = train_dataset.map(lambda x: {'length': len(x['input']) + len(x['output'])})
 
+    if args.dataset_format == 'prm800k-solutions':
+        assert args.truncate_toward_center is True, "prm800k-solutions dataset expects output to follow from input without a discontinuity, so enable --truncate_toward_center"
+
     data_collator = DataCollatorForCausalLM(
         tokenizer=tokenizer,
         source_max_len=args.source_max_len,
         target_max_len=args.target_max_len,
         train_on_source=args.train_on_source,
         predict_with_generate=args.predict_with_generate,
-        truncate_toward_center=args.dataset_format == 'prm800k-solutions',
+        truncate_toward_center=args.truncate_toward_center,
     )
     return dict(
         train_dataset=train_dataset if args.do_train else None,
@@ -767,12 +783,21 @@ def train():
         tokenizer_type='llama' if 'llama' in args.model_name_or_path else None, # Needed for HF name change
         use_auth_token=args.use_auth_token,
     )
-    if tokenizer._pad_token is None or args.dataset_format == 'prm800k-solutions':
+    if args.dataset_format == 'prm800k-solutions':
+        assert args.register_process_supervision_tokens, 'prm800k-solutions dataset_format requires tokenizer to support process supervision special tokens. enable --register_process_supervision_tokens.'
+        if 'pythia' in args.model_name_or_path:
+            assert args.register_bos_token, "GPTNeoXTokenizer doesn't have a legitimate BOS token, but prm800k-solutions dataset_format makes use of BOS in its prompt template. enable --register_bos_token"
+    if tokenizer._pad_token is None or args.register_process_supervision_tokens or args.register_bos_token:
         special_tokens: Dict[str, str] = {
-            'pad_token': DEFAULT_PAD_TOKEN,
+            **({
+                'pad_token': DEFAULT_PAD_TOKEN,
+            } if tokenizer._pad_token else {}),
+            **({
+                'bos_token': DEFAULT_BOS_TOKEN,
+            } if args.register_bos_token else {}),
             **({
                 'additional_special_tokens': list(process_supervision_tokens.values())
-            } if args.dataset_format == 'prm800k-solutions' else {}),
+            } if args.register_process_supervision_tokens else {}),
         }
         smart_tokenizer_and_embedding_resize(
             special_tokens_dict=special_tokens,
