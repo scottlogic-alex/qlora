@@ -95,6 +95,10 @@ class ModelArguments:
     model_name_or_path: Optional[str] = field(
         default="EleutherAI/pythia-12b"
     )
+    lora_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Apply an existing LoRA as a starting point for finetuning"}
+    )
     trust_remote_code: Optional[bool] = field(
         default=False,
         metadata={"help": "Enable unpickling of arbitrary code in AutoModelForCausalLM#from_pretrained."}
@@ -326,7 +330,7 @@ class SavePeftModelCallback(transformers.TrainerCallback):
         touch(join(args.output_dir, 'completed'))
         self.save_model(args, state, kwargs)
 
-def get_accelerate_model(args, checkpoint_dir):
+def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] = None):
 
     if torch.cuda.is_available():
         n_gpus = torch.cuda.device_count()
@@ -430,9 +434,13 @@ def get_accelerate_model(args, checkpoint_dir):
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
 
     if not args.full_finetune:
-        if checkpoint_dir is not None:
+        if checkpoint_dir is not None or lora_name_or_path is not None:
             print("Loading adapters from checkpoint.")
-            model = PeftModel.from_pretrained(model, join(checkpoint_dir, 'adapter_model'), is_trainable=True)
+            model = PeftModel.from_pretrained(
+                model,
+                join(checkpoint_dir, 'adapter_model') if checkpoint_dir is not None else lora_name_or_path,
+                is_trainable=True,
+            )
         else:
             print(f'adding LoRA modules...')
             modules = find_all_linear_names(args, model)
@@ -839,7 +847,7 @@ def train():
     if completed_training:
         print('Detected that training was already completed!')
 
-    model, tokenizer = get_accelerate_model(args, checkpoint_dir)
+    model, tokenizer = get_accelerate_model(args, checkpoint_dir, model_args.lora_name_or_path)
 
     model.config.use_cache = False
     print('loaded model')
@@ -889,7 +897,7 @@ def train():
             truncate_toward_center=args.truncate_toward_center,
             use_bos_token_in_prompt=args.use_bos_token_in_prompt,
             report_to_wandb=training_args.report_to and 'wandb' in training_args.report_to,
-            generate_steps=training_args.generate_steps
+            generate_steps=training_args.generate_steps,
         )
         callbacks.append(gen_callback)
     trainer = Seq2SeqTrainer(
