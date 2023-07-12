@@ -8,7 +8,7 @@ import os
 from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
-from typing import Optional, Dict, Sequence
+from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union
 import numpy as np
 from tqdm import tqdm
 import logging
@@ -28,7 +28,7 @@ from transformers import (
     LlamaTokenizer
 
 )
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, DatasetDict
 import evaluate
 
 from peft import (
@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 
 IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN = "[PAD]"
+
+process_supervision_tokens: Dict[str, str] = {
+    'step_start':   '<|step_start|>',
+    'step_end':     '<|step_end|>',
+    'answer_start': '<|answer_start|>',
+    'answer_end':   '<|answer_end|>',
+}
 
 @dataclass
 class ModelArguments:
@@ -95,7 +102,7 @@ class DataArguments:
     )
     dataset_format: Optional[str] = field(
         default=None,
-        metadata={"help": "Which dataset format is used. [alpaca|chip2|self-instruct|hh-rlhf]"}
+        metadata={"help": "Which dataset format is used. [alpaca|chip2|self-instruct|hh-rlhf|prm800k-solutions]"}
     )
 
 @dataclass
@@ -472,6 +479,70 @@ def extract_alpaca_dataset(example):
         prompt_format = ALPACA_PROMPT_DICT["prompt_no_input"]
     return {'input': prompt_format.format(**example)}
 
+class ExtractedPRM800KSolutionsSample(TypedDict):
+    input: str
+    output: str
+
+class PRM800KSolutionsSample(TypedDict):
+    instruction: str
+    responses: List[str]
+    next_response: str
+    answer: Optional[str]
+
+process_supervision_prompt = '''Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+{instruction}
+
+### Response:
+'''
+
+answer_response = '''{response}{answer}'''
+
+def format_step(step: str) -> str:
+    return ''.join((
+        process_supervision_tokens['step_start'],
+        step,
+        process_supervision_tokens['step_end'],
+    ))
+
+def format_answer(answer: str) -> str:
+    return ''.join((
+        process_supervision_tokens['answer_start'],
+        answer,
+        process_supervision_tokens['answer_end'],
+    ))
+
+def format_answer_response(
+    response: str,
+    answer: str,
+    answer_inband = True,
+) -> str:
+    """
+    answer_inband=True:
+    <|step_start|>Exactly.<|answer_start|>468<|answer_end|><|step_end|>
+
+    answer_inband=False:
+    <|step_start|>Exactly.<|step_end|><|answer_start|>468<|answer_end|>
+    """
+    formatted_answer: str = format_answer(answer)
+    if answer_inband:
+        return format_step(f'{response}{formatted_answer}')
+    return f'{format_step(response)}{formatted_answer}'
+
+def extract_prm800k_solutions_dataset(sample: PRM800KSolutionsSample) -> ExtractedPRM800KSolutionsSample:
+    history: str = ''.join((format_step(response) for response in sample['responses']))
+    latest_step: str = format_step(sample['next_response']) if sample['answer'] is None else format_answer_response(
+        response = sample['next_response'],
+        answer = sample['answer'],
+    )
+    output: str = f'{history}{latest_step}'
+    mapped: ExtractedPRM800KSolutionsSample = {
+        'input': process_supervision_prompt.format(instruction=sample['instruction']),
+        'output': output,
+    }
+    return mapped
+
 def local_dataset(dataset_name):
     if dataset_name.endswith('.json'):
         full_dataset = Dataset.from_json(path_or_paths=dataset_name)
@@ -500,6 +571,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         - hh-rlhf (Anthropic), 160800 examples
         - longform, 23.7k examples
         - oasst1 (OpenAssistant) primary message tree only, 9,846 examples
+        - prm800k-solutions, 12.4k examples
 
     Coming soon:
         - unnatural instructions core, 66010 examples
@@ -511,7 +583,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         - vicuna
 
     """
-    def load_data(dataset_name):
+    def load_data(dataset_name) -> Union[Dataset, DatasetDict]:
         if dataset_name == 'alpaca':
             return load_dataset("tatsu-lab/alpaca")
         elif dataset_name == 'alpaca-clean':
@@ -526,6 +598,8 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
             return load_dataset("akoksal/LongForm")
         elif dataset_name == 'oasst1':
             return load_dataset("timdettmers/openassistant-guanaco")
+        elif dataset_name == 'prm800k-solutions':
+            return load_dataset("Birchlabs/openai-prm800k-solutions-only")
         elif dataset_name == 'vicuna':
             raise NotImplementedError("Vicuna data was not released.")
         else:
@@ -539,7 +613,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
             else:
                 raise NotImplementedError(f"Dataset {dataset_name} not implemented yet.")
 
-    def format_dataset(dataset, dataset_format):
+    def format_dataset(dataset: Union[Dataset, DatasetDict], dataset_format: Optional[str]) -> Union[Dataset, DatasetDict]:
         if (
             dataset_format == 'alpaca' or dataset_format == 'alpaca-clean' or
             (dataset_format is None and args.dataset in ['alpaca', 'alpaca-clean'])
@@ -566,6 +640,13 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         elif dataset_format == 'input-output':
             # leave as is
             pass
+        elif dataset_format == 'prm800k-solutions':
+            dataset = dataset.map(extract_prm800k_solutions_dataset, remove_columns=[
+                'instruction',
+                'responses',
+                'next_response',
+                'answer',
+            ])
         # Remove unused columns.
         dataset = dataset.remove_columns(
             [col for col in dataset.column_names['train'] if col not in ['input', 'output']]
@@ -656,9 +737,15 @@ def train():
         tokenizer_type='llama' if 'llama' in args.model_name_or_path else None, # Needed for HF name change
         use_auth_token=args.use_auth_token,
     )
-    if tokenizer._pad_token is None:
+    if tokenizer._pad_token is None or args.dataset_format == 'prm800k-solutions':
+        special_tokens: Dict[str, str] = {
+            'pad_token': DEFAULT_PAD_TOKEN,
+            **({
+                'additional_special_tokens': list(process_supervision_tokens.values())
+            } if args.dataset_format == 'prm800k-solutions' else {}),
+        }
         smart_tokenizer_and_embedding_resize(
-            special_tokens_dict=dict(pad_token=DEFAULT_PAD_TOKEN),
+            special_tokens_dict=special_tokens,
             tokenizer=tokenizer,
             model=model,
         )
