@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from peft import PeftModelForCausalLM
 from datasets import Dataset
 from typing import List, Iterable, TypedDict, Iterator, Dict, Literal
-from torch import LongTensor, FloatTensor
+from torch import LongTensor
 from itertools import tee, cycle
 from enum import Enum, auto
 
@@ -43,6 +43,7 @@ class GenerationCallback(TrainerCallback):
 	use_bos_token_in_prompt: bool
 
 	report_to_wandb: bool
+	generate_steps: int
 
 	favourite_sample: str = field(init=False)
 	data_it: Iterable[str] = field(init=False)
@@ -63,6 +64,8 @@ class GenerationCallback(TrainerCallback):
 		Event called at the beginning of a training step. If using gradient accumulation, one training step might take
 		several inputs.
 		"""
+		if state.global_step % self.generate_steps > 0:
+			return
 		sample_source: SampleSource = next(self.sample_source)
 
 		sample: str = self.favourite_sample if sample_source is SampleSource.Favourite else next(self.data_it)

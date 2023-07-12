@@ -883,13 +883,13 @@ def train():
             model=model,
             tokenizer=tokenizer,
             dataset=data_module['eval_dataset'],
-            # collator=data_module['data_collator'],
             generation_config=training_args.generation_config,
             source_max_len=args.source_max_len,
             target_max_len=args.target_max_len,
             truncate_toward_center=args.truncate_toward_center,
             use_bos_token_in_prompt=args.use_bos_token_in_prompt,
             report_to_wandb=training_args.report_to and 'wandb' in training_args.report_to,
+            generate_steps=training_args.generate_steps
         )
         callbacks.append(gen_callback)
     trainer = Seq2SeqTrainer(
