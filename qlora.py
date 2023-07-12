@@ -9,10 +9,6 @@ from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
 from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union, Literal
-if sys.version_info < (3, 11):
-    from typing_extensions import NotRequired
-else:
-    from typing import NotRequired
 import numpy as np
 from tqdm import tqdm
 import logging
@@ -24,7 +20,7 @@ from packaging.version import parse
 
 import torch
 import transformers
-from torch import LongTensor, BoolTensor
+from torch import LongTensor
 from contextlib import ContextDecorator, nullcontext
 from torch.nn.utils.rnn import pad_sequence
 import argparse
@@ -34,6 +30,7 @@ from transformers import (
     BatchEncoding,
     set_seed,
     Seq2SeqTrainer,
+    TrainerCallback,
     BitsAndBytesConfig,
     LlamaTokenizer
 
@@ -49,6 +46,8 @@ from peft import (
 )
 from peft.tuners.lora import LoraLayer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+from src.gen_callback import GenerationCallback
+from src.collation import CollatedData, DataInstance
 
 
 def is_ipex_available():
@@ -251,6 +250,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     torch_compile: bool = field(default=False)
     metric_for_best_model: Optional[str] = field(default=None)
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
+    generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
 
 @dataclass
 class GenerationArguments:
@@ -393,7 +393,7 @@ def get_accelerate_model(args, checkpoint_dir):
         use_auth_token=args.use_auth_token,
     )
     if args.dataset_format == 'prm800k-solutions':
-        assert args.register_process_supervision_tokens, 'prm800k-solutions dataset_format requires tokenizer to support process supervision special tokens. enable --register_process_supervision_tokens.'
+        # assert args.register_process_supervision_tokens, 'prm800k-solutions dataset_format requires tokenizer to support process supervision special tokens. enable --register_process_supervision_tokens.'
         if 'pythia' in args.model_name_or_path:
             assert args.register_bos_token, "GPTNeoXTokenizer doesn't have a legitimate BOS token, but prm800k-solutions dataset_format makes use of BOS in its prompt template. enable --register_bos_token"
     if args.use_bos_token_in_prompt and tokenizer._bos_token is None:
@@ -510,11 +510,6 @@ class truncation_side(ContextDecorator):
         self.tokenizer.truncation_side = self.orig_truncation_side
         return False
 
-class CollatedData(TypedDict):
-    input_ids: LongTensor
-    attention_mask: BoolTensor
-    labels: NotRequired[LongTensor]
-
 @dataclass
 class DataCollatorForCausalLM(object):
     tokenizer: transformers.PreTrainedTokenizer
@@ -525,7 +520,7 @@ class DataCollatorForCausalLM(object):
     truncate_toward_center: bool
     use_bos_token_in_prompt: bool
 
-    def __call__(self, instances: Sequence[Dict]) -> CollatedData:
+    def __call__(self, instances: Sequence[DataInstance]) -> CollatedData:
         # Extract elements
         sources: List[str] = [f"{self.tokenizer.bos_token if self.use_bos_token_in_prompt else ''}{example['input']}" for example in instances]
         targets: List[str] = [f"{example['output']}{self.tokenizer.eos_token}" for example in instances]
@@ -894,10 +889,21 @@ def train():
                 "torch_compile_mode": training_args.torch_compile_mode,
             }
         )
+    callbacks: List[TrainerCallback] = []
+    if training_args.generate_steps is not None:
+        assert args.dataset_format == 'prm800k-solutions', 'in-run continuation of representative prompts is only implemented for prm800k-solutions dataset_format'
+        gen_callback = GenerationCallback(
+            model=model,
+            # tokenizer=tokenizer,
+            dataset=data_module['test'],
+            collator=data_module['data_collator'],
+        )
+        callbacks.append(gen_callback)
     trainer = Seq2SeqTrainer(
         model=model,
         tokenizer=tokenizer,
         args=training_args,
+        callbacks=callbacks,
         **{k:v for k,v in data_module.items() if k != 'predict_dataset'},
     )
 
