@@ -328,8 +328,8 @@ class SavePeftModelCallback(transformers.TrainerCallback):
             else:
                 torch.save(state_dict, os.path.join(checkpoint_folder, "embed_tokens.pt"))
         
-        lm_head: Linear = kwargs["model"].get_output_embeddings()
-        if any(map(lambda p: p.requires_grad, lm_head.parameters())):
+        lm_head: Optional[Linear] = kwargs["model"].get_output_embeddings()
+        if lm_head is not None and any(map(lambda p: p.requires_grad, lm_head.parameters())):
             state_dict: OrderedDict[str, FloatTensor] = lm_head.state_dict()
             if args.save_safetensors:
                 save_file(state_dict, os.path.join(checkpoint_folder, "lm_head.safetensors"))
