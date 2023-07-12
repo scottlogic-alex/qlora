@@ -8,7 +8,7 @@ import os
 from os.path import exists, join, isdir
 from dataclasses import dataclass, field
 import sys
-from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union, Literal, Tuple
+from typing import Optional, Dict, Sequence, TypedDict, List, Optional, Union, Literal, Tuple, OrderedDict
 import numpy as np
 from tqdm import tqdm
 import logging
@@ -17,7 +17,8 @@ import pandas as pd
 
 import torch
 import transformers
-from torch import LongTensor
+from torch import LongTensor, FloatTensor
+from torch.nn import Embedding
 from contextlib import nullcontext
 from torch.nn.utils.rnn import pad_sequence
 import argparse
@@ -43,6 +44,7 @@ from peft import (
 )
 from peft.tuners.lora import LoraLayer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+from safetensors.torch import save_file
 from src.gen_callback import GenerationCallback
 from src.collation import CollatedData, DataInstance
 from src.truncation_side import truncation_side
@@ -290,6 +292,14 @@ class SavePeftModelCallback(transformers.TrainerCallback):
 
         peft_model_path = os.path.join(checkpoint_folder, "adapter_model")
         kwargs["model"].save_pretrained(peft_model_path)
+
+        embedding: Embedding = kwargs["model"].get_input_embeddings()
+        if any(map(lambda p: p.requires_grad, embedding.parameters())):
+            state_dict: OrderedDict[str, FloatTensor] = embedding.state_dict()
+            if args.save_safetensors:
+                save_file(state_dict, os.path.join(checkpoint_folder, "embed_tokens.safetensors"))
+            else:
+                torch.save(state_dict, os.path.join(checkpoint_folder, "embed_tokens.pt"))
 
         pytorch_model_path = os.path.join(checkpoint_folder, "pytorch_model.bin")
         if os.path.exists(pytorch_model_path):
