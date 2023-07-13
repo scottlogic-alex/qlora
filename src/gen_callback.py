@@ -13,9 +13,10 @@ from dataclasses import dataclass, field
 from peft import PeftModelForCausalLM
 from datasets import Dataset
 from typing import List, Iterable, TypedDict, Iterator, Dict, Literal
-from torch import LongTensor, no_grad
+from torch import LongTensor, no_grad, autocast
 from itertools import tee, cycle
 from enum import Enum, auto
+import torch
 
 from .callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from .iteration import nth, repeatedly
@@ -94,7 +95,8 @@ class GenerationCallback(TrainerCallback):
 		streamer = CallbackTextIteratorStreamer(self.tokenizer, callback=on_text, skip_prompt=True, skip_special_tokens=False)
 
 		print(instruction)
-		with no_grad():
+		with no_grad(), autocast(device_type=self.model.device.type, dtype=torch.float16):
+			self.model.gradient_checkpointing_disable()
 			prediction: LongTensor = self.model.generate(
 				input_ids=encoded['input_ids'].to(self.model.device),
 				attention_mask=encoded['attention_mask'].to(self.model.device),
@@ -103,6 +105,7 @@ class GenerationCallback(TrainerCallback):
 				stopping_criteria=self.stopping_criteria,
 				streamer=streamer,
 			)
+			self.model.gradient_checkpointing_enable()
 		print('')
 
 		# decoded: str = self.tokenizer.decode(prediction[0, encoded['input_ids'].size(-1):], skip_special_tokens=False, clean_up_tokenization_spaces=True)
