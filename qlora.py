@@ -904,6 +904,10 @@ def train():
 
     model, tokenizer = get_accelerate_model(args, checkpoint_dir, model_args.lora_name_or_path)
 
+    # clean up the buffers allocated by PeftModel.from_pretrained() in get_accelerate_model().
+    # PEFT init allocates and deallocates a lot of memory.
+    torch.cuda.empty_cache()
+
     model.config.use_cache = False
     print('loaded model')
     set_seed(args.seed)
