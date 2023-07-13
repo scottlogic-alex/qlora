@@ -913,9 +913,9 @@ def train():
     if training_args.report_to and 'wandb' in training_args.report_to:
         import wandb
         wandb.init(
-            entity='scottlogic',
+            entity='sl-ml',
             project='llm-stepwise',
-            name=f'llama7b-bsz{training_args.per_device_train_batch_size}-bit{training_args.bits}' if args.run_name is None else args.run_name,
+            name=f'qlora' if args.run_name is None else args.run_name,
             config={
                 "batch_size": training_args.per_device_train_batch_size,
                 "learning_rate": training_args.learning_rate,
