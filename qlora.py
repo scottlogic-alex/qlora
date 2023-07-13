@@ -876,6 +876,9 @@ def train():
                     model.config.pad_token_id if model.config.pad_token_id != -1 else tokenizer.pad_token_id
                 ),
         })
+    # clean up the buffers allocated by PeftModel.from_pretrained() in get_accelerate_model().
+    # PEFT init allocates and deallocates a lot of memory.
+    torch.cuda.empty_cache()
     data_module = make_data_module(tokenizer=tokenizer, args=args)
     if training_args.report_to and 'wandb' in training_args.report_to:
         import wandb
