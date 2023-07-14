@@ -244,6 +244,8 @@ def main():
     use_fast = False,
     tokenizer_type='llama' if 'llama' in (model_args.tokenizer_model_name_or_path or model_args.model_name_or_path) else None, # Needed for HF name change
   )
+  if 'falcon' in model_args.tokenizer_model_name_or_path:
+    generation_config.eos_token_id = generation_config.pad_token_id = tokenizer.eos_token_id
 
   if 'llama' in model_args.tokenizer_model_name_or_path or isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
     # LLaMA tokenizer may not have correct special tokens set.
