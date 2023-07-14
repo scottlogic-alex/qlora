@@ -113,7 +113,6 @@
       "args": [
         "--model_name_or_path", "huggyllama/llama-7b",
         "--tokenizer_model_name_or_path", "huggyllama/llama-7b",
-        "--bf16",
         "--overrun_countermeasures", "False",
         "--prompt_style", "bare"
       ]
@@ -129,7 +128,6 @@
         "--lora_model_name_or_path", "tloen/alpaca-lora-7b",
         "--tokenizer_model_name_or_path", "huggyllama/llama-7b",
         "--use_bos_token_in_prompt",
-        "--bf16",
         "--overrun_countermeasures", "False"
       ]
     },
@@ -145,7 +143,6 @@
         "--tokenizer_model_name_or_path", "huggyllama/llama-7b",
         "--lora_model_name_or_path", "/home/birch/git/qlora/output_alpaca_no_special_tokens_io_long_2/checkpoint-1664/adapter_model",
         "--use_bos_token_in_prompt",
-        "--bf16",
         "--overrun_countermeasures", "False"
       ]
     },
@@ -160,7 +157,6 @@
         "--tokenizer_model_name_or_path", "huggyllama/llama-13b",
         "--lora_model_name_or_path", "chansung/alpaca-lora-13b",
         "--use_bos_token_in_prompt",
-        "--bf16",
         "--overrun_countermeasures", "False"
       ]
     },
@@ -181,7 +177,6 @@
         "--input_embedding_path", "embed_tokens.pt",
         "--output_embedding_path", "lm_head.pt",
         "--use_bos_token_in_prompt",
-        "--bf16",
         "--overrun_countermeasures", "False"
       ]
     },
@@ -194,7 +189,6 @@
       "args": [
         "--model_name_or_path", "huggyllama/llama-30b",
         "--tokenizer_model_name_or_path", "huggyllama/llama-30b",
-        "--bf16",
         "--overrun_countermeasures", "False",
         "--prompt_style", "bare"
       ]
