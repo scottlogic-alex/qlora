@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, TypedDict, NamedTuple, List, Dict
+from typing import Optional, TypedDict, NamedTuple, List, Dict, TypeAlias
 import torch
 from torch import LongTensor, FloatTensor
 from torch.nn import Embedding, Linear
@@ -25,7 +25,7 @@ from time import perf_counter
 
 from transformers import AutoTokenizer
 from safetensors.torch import load_file
-from typing import Optional, OrderedDict
+from typing import Optional, OrderedDict, Literal
 
 from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from src.stop_on_tokens import StopOnTokens
@@ -58,8 +58,27 @@ class Message(NamedTuple):
 class PromptStyle(Enum):
   Bare = 'bare'
   Chat = 'chat'
+# I am not proud of this, but when I attempted to specify Enum fields on the arg dataclasses:
+# hfparser.parse_args_into_dataclasses() turned the enum instances into string values.
+# so we make some types to capture what we're actually going to receive.
+PromptStyleLiteral: TypeAlias = Literal['bare', 'chat']
+
+class Dtype(Enum):
+  Bf16 = 'bf16'
+  Fp16 = 'fp16'
+  Fp32 = 'fp32'
+DtypeLiteral: TypeAlias = Literal['bf16', 'fp16', 'fp32']
 
 class SufficientResponse(BaseException): ...
+
+def reify_dtype(dtype: DtypeLiteral) -> torch.dtype:
+  match(dtype):
+    case 'bf16':
+      return torch.bfloat16
+    case 'fp16':
+      return torch.float16
+    case 'fp32':
+      return torch.float32
 
 @dataclass
 class ModelArguments:
@@ -101,9 +120,13 @@ class ModelArguments:
     default=4,
     metadata={"help": "How many bits to use."}
   )
-  bf16: Optional[bool] = field(
-    default=False,
-    metadata={"help": "Compute type of the model. If quantizing: this is also the compute type used for quantized computations. Prefer to turn this on if you are quantizing and your GPU supports it. You probably also want it even if you're not quantizing."}
+  model_dtype: DtypeLiteral = field(
+    default=Dtype.Fp16.value,
+    metadata={"help": "Compute type of the model. Used for non-quantized computations.", "choices": [p.value for p in Dtype]}
+  )
+  bnb_compute_dtype: DtypeLiteral = field(
+    default=Dtype.Fp16.value,
+    metadata={"help": "Compute type used for quantized computations. Prefer to turn this on if you are quantizing and your GPU supports it. You probably also want it even if you're not quantizing. Float16 should be better than bfloat16. Float32 can be slightly better than float16.", "choices": [p.value for p in Dtype]}
   )
   use_bos_token_in_prompt: Optional[bool] = field(
     default=False,
@@ -136,7 +159,7 @@ class MiscArguments:
     metadata={"help": "Initial message sent to the model. For example: What is $\sqrt{53}$ in simplest radical form?"}
   )
   # if you actually set the type hint to PromptStyle: you will find that HF/argparse assign a string anyway
-  prompt_style: str = field(
+  prompt_style: PromptStyleLiteral = field(
     default=PromptStyle.Chat.value,
     metadata={"choices": [p.value for p in PromptStyle]}
   )
@@ -195,16 +218,17 @@ def get_model(args: ModelArguments) -> LlamaForCausalLM:
     trust_remote_code=args.trust_remote_code,
   )
   cuda_avail = torch.cuda.is_available()
-  compute_dtype = torch.bfloat16 if args.bf16 else torch.float16
   load_in_4bit = args.bits == 4 and cuda_avail
   load_in_8bit = args.bits == 8 and cuda_avail
+
+  bnb_compute_dtype: torch.dtype = reify_dtype(args.bnb_compute_dtype)
 
   quantization_config = BitsAndBytesConfig(
     load_in_4bit=load_in_4bit,
     load_in_8bit=load_in_8bit,
     llm_int8_threshold=6.0,
     llm_int8_has_fp16_weight=False,
-    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_compute_dtype=bnb_compute_dtype,
     bnb_4bit_use_double_quant=args.double_quant,
     bnb_4bit_quant_type=args.quant_type,
   ) if cuda_avail else None
@@ -212,8 +236,11 @@ def get_model(args: ModelArguments) -> LlamaForCausalLM:
   if not cuda_avail:
     logger.warning("You don't have CUDA, so we have turned off quantization. If you happen to be on a Mac: you probably have enough unified memory to run in fp16 anyway…")
 
-  if compute_dtype == torch.float16 and cuda_avail and torch.cuda.is_bf16_supported():
-    print("Your GPU supports bfloat16; you may want to try it with --bf16 (note: I'm not sure how important this is for inference, but it's certainly preferred when training with 4-bit quantization.)")
+  # Actually float16 supposedly has lower error than bfloat16 for *inference*.
+  # if compute_dtype == torch.float16 and cuda_avail and torch.cuda.is_bf16_supported():
+  #   print("Your GPU supports bfloat16; you may want to try it with --bf16 (note: I'm not sure how important this is for inference, but it's certainly preferred when training with 4-bit quantization.)")
+
+  model_dtype: torch.dtype = reify_dtype(args.model_dtype)
   
   model: LlamaForCausalLM = AutoModelForCausalLM.from_pretrained(
     args.model_name_or_path,
@@ -222,10 +249,10 @@ def get_model(args: ModelArguments) -> LlamaForCausalLM:
     load_in_8bit=load_in_8bit,
     device_map=0,
     quantization_config=quantization_config,
-    torch_dtype=compute_dtype,
+    torch_dtype=model_dtype,
     trust_remote_code=args.trust_remote_code,
   ).eval()
-  model.config.torch_dtype=compute_dtype
+  model.config.torch_dtype=model_dtype
 
   return model
 
