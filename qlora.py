@@ -35,7 +35,10 @@ from transformers import (
 
 )
 from datasets import load_dataset, Dataset, DatasetDict
+# evaluate.py clashes with package 'evaluate'
+sys.path.remove('')
 import evaluate
+sys.path.insert(0, '')
 
 from peft import (
     prepare_model_for_kbit_training,
