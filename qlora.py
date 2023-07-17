@@ -526,11 +526,13 @@ class DataCollatorForCausalLM(object):
             else:
                 input_ids.append(torch.tensor(tokenized_source))
         # Apply padding
-        input_ids: LongTensor = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        # if there's no pad token in the vocabulary: we can pad the sequence with anything we like, since we're gonna mask it out anyway
+        pad_token_id: int = IGNORE_INDEX if self.tokenizer.pad_token_id is None else self.tokenizer.pad_token_id
+        input_ids: LongTensor = pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
         labels: Optional[LongTensor] = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) if not self.predict_with_generate else None
         data_dict: CollatedData = {
             'input_ids': input_ids,
-            'attention_mask':input_ids.ne(self.tokenizer.pad_token_id),
+            'attention_mask':input_ids.ne(pad_token_id),
         }
         if labels is not None:
             data_dict['labels'] = labels
