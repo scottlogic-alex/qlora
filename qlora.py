@@ -138,6 +138,10 @@ class DataArguments:
         default=False,
         metadata={"help": "Truncate prompt from left side, truncate continuation from right side."}
     )
+    avoid_embed_resize: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Avoid resizing input embeddings and lm head (because this unfreezes large layers, increasing VRAM usage by gigabytes). If the only added token is PAD: skip it (we'll mask out padding anyway, so it doesn't need to be in the vocab). If other tokens need adding: abort."}
+    )
 
 @dataclass
 class TrainingArguments(transformers.Seq2SeqTrainingArguments):
@@ -863,11 +867,14 @@ def train():
     if args.register_process_supervision_tokens:
         special_tokens['additional_special_tokens'] = list(process_supervision_tokens.values())
     if special_tokens:
-        smart_tokenizer_and_embedding_resize(
-            special_tokens_dict=special_tokens,
-            tokenizer=tokenizer,
-            model=model,
-        )
+        if args.avoid_embed_resize:
+            assert special_tokens == { 'pad_token': DEFAULT_PAD_TOKEN }, 'you have asked to avoid resizing the embedding. if the vocab being registered was just a PAD token, we could skip that since it gets masked out anyway. but you are attempting to add other tokens, and we cannot work around that so easily.'
+        else:
+            smart_tokenizer_and_embedding_resize(
+                special_tokens_dict=special_tokens,
+                tokenizer=tokenizer,
+                model=model,
+            )
     if 'llama' in args.model_name_or_path or isinstance(tokenizer, LlamaTokenizer):
         # LLaMA tokenizer may not have correct special tokens set.
         # Check and add them if missing to prevent them from being parsed into different tokens.
