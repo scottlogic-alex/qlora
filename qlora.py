@@ -428,12 +428,11 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         trust_remote_code=args.trust_remote_code,
         use_auth_token=args.use_auth_token,
     )
-    if args.dataset_format == 'prm800k-solutions':
-        # assert args.register_process_supervision_tokens, 'prm800k-solutions dataset_format requires tokenizer to support process supervision special tokens. enable --register_process_supervision_tokens.'
-        if 'pythia' in args.model_name_or_path:
-            assert args.register_bos_token, "GPTNeoXTokenizer doesn't have a legitimate BOS token, but prm800k-solutions dataset_format makes use of BOS in its prompt template. enable --register_bos_token"
-    if args.use_bos_token_in_prompt and tokenizer._bos_token is None:
-        assert args.register_bos_token, "You have required (via --use_bos_token_in_prompt) that BOS token be used in prompt, but this tokenizer doesn't have one. you should either register a BOS token via --register_bos_token, or (preferably) avoid using --use_bos_token_in_prompt, as the model was not pretrained to park attention on BOS when there's nothing to attend to. well, if you finetune it enough perhaps you'd get away with it."
+    if args.use_bos_token_in_prompt:
+        if tokenizer.bos_token_id == tokenizer.eos_token_id:
+            assert args.register_bos_token, "Your BOS and EOS are the same. This is typical of models using GPTNeoXTokenizer, such as Pythia. you have expressed (via --use_bos_token_in_prompt) that you intend to use BOS in your prompt. This using BOS but having it mean EOS is probably not what you want. You should enable --register_bos_token, or disable --use_bos_token_in_prompt."
+        if tokenizer._bos_token is None:
+            assert args.register_bos_token, "You have required (via --use_bos_token_in_prompt) that BOS token be used in prompt, but this tokenizer doesn't have one. you should either register a BOS token via --register_bos_token, or (preferably) avoid using --use_bos_token_in_prompt, as the model was not pretrained to park attention on BOS when there's nothing to attend to. well, if you finetune it enough perhaps you'd get away with it."
     special_tokens: Dict[str, str] = {}
     if tokenizer._pad_token is None:
         special_tokens['pad_token'] = DEFAULT_PAD_TOKEN
