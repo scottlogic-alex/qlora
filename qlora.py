@@ -53,6 +53,8 @@ from peft.tuners.lora import LoraLayer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 from safetensors.torch import save_file
 from src.gen_callback import GenerationCallback
+from src.memory_usage_callback import MemoryUsageCallback
+from src.terminate_callback import TerminateCallback
 from src.collation import CollatedData, DataInstance
 from src.truncation_side import truncation_side
 
@@ -264,6 +266,8 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     save_safetensors: bool = field(default=False)
     torch_compile: bool = field(default=False)
     simulate_worst_case_seq_len: bool = field(default=False, metadata={"help": "pad prompts to maximum size, to help you measure the worst-case memory usage you'll experience in your dataset."})
+    measure_memory: bool = field(default=False, metadata={"help": "Measures your VRAM usage at end of first step (i.e. after gradient accumulation)."})
+    terminate_after_first_step: bool = field(default=False, metadata={"help": "shuts down Python without saving a checkpoint, after first step. This is to be used in concert with --measure_memory, so you can measure the step cost then kill the run."})
     metric_for_best_model: Optional[str] = field(default=None)
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
     generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
@@ -969,6 +973,12 @@ def train():
             generate_steps=training_args.generate_steps,
         )
         callbacks.append(gen_callback)
+    if training_args.measure_memory:
+        memory_usage_callback = MemoryUsageCallback()
+        callbacks.append(memory_usage_callback)
+    if training_args.terminate_after_first_step:
+        terminate_callback = TerminateCallback()
+        callbacks.append(terminate_callback)
     trainer = Seq2SeqTrainer(
         model=model,
         tokenizer=tokenizer,
