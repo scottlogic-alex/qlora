@@ -273,6 +273,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
     generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
     adapt_attn_only: bool = field(default=False, metadata={"help": 'Use original LoRA strategy of adapting only attn QKVO projections (i.e. not adapting MLPs). Not recommended, except for comparison purposes.'})
+    quantize: bool = field(default=True, metadata={"help": 'Whether to use 4-bit/8-bit quantization. Disable this for comparison purposes only.'})
 
 @dataclass
 class GenerationArguments:
@@ -381,7 +382,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         max_memory = {'': max_memory[local_rank]}
 
 
-    if args.full_finetune: assert args.bits in [16, 32]
+    if args.full_finetune or not args.quantize: assert args.bits in [16, 32]
 
     print(f'loading base model {args.model_name_or_path}...')
     compute_dtype = (torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32))
@@ -400,7 +401,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
             bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=args.double_quant,
             bnb_4bit_quant_type=args.quant_type,
-        ),
+        ) if args.quantize else None,
         torch_dtype=(torch.float32 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)),
         trust_remote_code=args.trust_remote_code,
         use_auth_token=args.use_auth_token
@@ -463,7 +464,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
             ),
         })
     
-    if not args.full_finetune:
+    if args.quantize and not args.full_finetune:
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
 
     if lora_name_or_path is not None:
