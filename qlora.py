@@ -272,6 +272,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     metric_for_best_model: Optional[str] = field(default=None)
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
     generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
+    adapt_attn_only: bool = field(default=False, metadata={"help": 'Use original LoRA strategy of adapting only attn QKVO projections (i.e. not adapting MLPs). Not recommended, except for comparison purposes.'})
 
 @dataclass
 class GenerationArguments:
@@ -483,7 +484,9 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
             )
         else:
             print(f'adding LoRA modules...')
-            modules = find_all_linear_names(args, model)
+            modules: List[str] = [
+                f'{p}_proj' for p in 'qkvo'
+            ] if args.adapt_attn_only else find_all_linear_names(args, model)
             config = LoraConfig(
                 r=args.lora_r,
                 lora_alpha=args.lora_alpha,
