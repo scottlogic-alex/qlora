@@ -464,8 +464,30 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
             ),
         })
     
-    if args.quantize and not args.full_finetune:
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+    if not args.full_finetune:
+        if args.quantize:
+            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+        else:
+            # prepare_model_for_kbit_training() casts too many layers to float32, causing OOM.
+            # it actually only intended to upcast norms and embeddings, but accidentally upcasts every Linear too.
+            for name, param in model.named_parameters():
+                # freeze base model's layers
+                param.requires_grad = False
+                if 'norm' in name:
+                    # modeling_llama.LlamaRMSNorm
+                    param.data = param.data.to(torch.float32)
+
+            model.get_input_embeddings().weight.data = model.get_input_embeddings().weight.data.to(torch.float32)
+            model.get_output_embeddings().weight.data = model.get_output_embeddings().weight.data.to(torch.float32)
+
+            if args.gradient_checkpointing:
+                if hasattr(model, "enable_input_require_grads"):
+                    model.enable_input_require_grads()
+                else:
+                    def make_inputs_require_grad(module, input, output):
+                        output.requires_grad_(True)
+                    model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+                model.gradient_checkpointing_enable()
 
     if lora_name_or_path is not None:
         print(f"Loading base LoRA from checkpoint '{lora_name_or_path}'.")
