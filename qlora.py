@@ -217,7 +217,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     )
     bits: int = field(
         default=4,
-        metadata={"help": "How many bits to use."}
+        metadata={"help": "How many bits to use.", "choices": [4, 8, 16, 32]}
     )
     lora_r: int = field(
         default=64,
