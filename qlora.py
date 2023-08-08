@@ -273,7 +273,6 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
     generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
     adapt_attn_only: bool = field(default=False, metadata={"help": 'Use original LoRA strategy of adapting only attn QKVO projections (i.e. not adapting MLPs). Not recommended, except for comparison purposes.'})
-    quantize: bool = field(default=True, metadata={"help": 'Whether to use 4-bit/8-bit quantization. Disable this for comparison purposes only.'})
 
 @dataclass
 class GenerationArguments:
@@ -382,7 +381,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         max_memory = {'': max_memory[local_rank]}
 
 
-    if args.full_finetune or not args.quantize: assert args.bits in [16, 32]
+    if args.full_finetune: assert args.bits in [16, 32]
 
     print(f'loading base model {args.model_name_or_path}...')
     compute_dtype = (torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32))
@@ -401,7 +400,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
             bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=args.double_quant,
             bnb_4bit_quant_type=args.quant_type,
-        ) if args.quantize else None,
+        ) if args.bits in [4, 8] else None,
         torch_dtype=(torch.float32 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)),
         trust_remote_code=args.trust_remote_code,
         use_auth_token=args.use_auth_token
@@ -465,11 +464,15 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         })
     
     if not args.full_finetune:
-        if args.quantize:
+        if args.bits in [4, 8]:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
         else:
-            # prepare_model_for_kbit_training() casts too many layers to float32, causing OOM.
-            # it actually only intended to upcast norms and embeddings, but accidentally upcasts every Linear too.
+            # prepare_model_for_kbit_training() says it's only trying to cast the following to float32:
+            # - layernorms
+            # - lm_head (model.get_output_embeddings())
+            # note: it *also* casts model.get_input_embeddings() to float32, which it did not say was intentional.
+            # prepare_model_for_kbit_training() is broken for non-quantized; it accidentally targets MLP layers, which I think was not intentional.
+            # so we explicitly filter it to the layers it targets in a quantized run.
             for name, param in model.named_parameters():
                 # freeze base model's layers
                 param.requires_grad = False
