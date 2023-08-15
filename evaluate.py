@@ -260,7 +260,7 @@ def main():
   hfparser = HfArgumentParser((ModelArguments, GenerationArguments, MiscArguments))
   model_args, generation_args, misc_args, extra_args = hfparser.parse_args_into_dataclasses(return_remaining_strings=True)
   if extra_args:
-    raise f"Received unsupported command-line args: {extra_args}"
+    raise ValueError(f"Received unsupported command-line args: {extra_args}")
   generation_config = GenerationConfig(**vars(generation_args))
 
   model: LlamaForCausalLM = get_model(model_args)
