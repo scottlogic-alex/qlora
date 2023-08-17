@@ -27,6 +27,7 @@ from torch.nn.functional import pad
 from torch.nn.utils.rnn import pad_sequence
 import argparse
 from transformers import (
+    AutoConfig,
     AutoTokenizer,
     AutoModelForCausalLM,
     BatchEncoding,
@@ -103,6 +104,10 @@ process_supervision_tokens: Dict[str, str] = {
 class ModelArguments:
     model_name_or_path: Optional[str] = field(
         default="EleutherAI/pythia-12b"
+    )
+    use_flash_llama: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Loads LLaMA models via flash attn 2."}
     )
     lora_name_or_path: Optional[str] = field(
         default=None,
@@ -389,11 +394,40 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
 
     if args.full_finetune: assert args.bits in [16, 32]
 
+    print(f'loading base model config {args.model_name_or_path}...')
+    config, _ = AutoConfig.from_pretrained(
+        args.model_name_or_path,
+        return_unused_kwargs=True,
+        cache_dir=args.cache_dir,
+        use_auth_token=args.use_auth_token,
+        trust_remote_code=args.trust_remote_code,
+    )
+    if args.use_flash_llama and config.model_type == 'llama':
+        updates: Dict[str, Union[str, int, float, bool, None]] = {}
+        # note: at the time of writing, togethercomputer's modeling_flash_llama has not merged my PR which fixes padding of attention weights:
+        # https://huggingface.co/togethercomputer/LLaMA-2-7B-32K/discussions/17
+        # so this will only work if you've modified your local cached copy of togethercomputer with my fix.
+        flash_model_name = 'togethercomputer/LLaMA-2-7B-32K--modeling_flash_llama.LlamaForCausalLM'
+        if 'num_key_value_heads' not in config.__dict__:
+            updates['num_key_value_heads'] = config.num_attention_heads
+        if 'auto_map' in config.__dict__:
+            if not ('AutoModelForCausalLM' in config.auto_map and 'flash' in config.auto_map['AutoModelForCausalLM']):
+                updates['auto_map']['AutoModelForCausalLM'] = flash_model_name
+        else:
+            updates['auto_map'] = { 'AutoModelForCausalLM': flash_model_name }
+        if 'rope_scaling' not in config.__dict__:
+            updates['rope_scaling'] = { 'factor': (args.source_max_len + args.target_max_len)/config.max_position_embeddings, 'type': 'linear' }
+        if 'pretraining_tp' not in config.__dict__:
+            updates['pretraining_tp'] = 1
+        if updates:
+            config.update(updates)
+
     print(f'loading base model {args.model_name_or_path}...')
     compute_dtype = (torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32))
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         cache_dir=args.cache_dir,
+        config=config,
         load_in_4bit=args.bits == 4,
         load_in_8bit=args.bits == 8,
         device_map=device_map,
