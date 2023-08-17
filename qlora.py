@@ -404,10 +404,7 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
     )
     if args.use_flash_llama and config.model_type == 'llama':
         updates: Dict[str, Union[str, int, float, bool, None]] = {}
-        # note: at the time of writing, togethercomputer's modeling_flash_llama has not merged my PR which fixes padding of attention weights:
-        # https://huggingface.co/togethercomputer/LLaMA-2-7B-32K/discussions/17
-        # so this will only work if you've modified your local cached copy of togethercomputer with my fix.
-        flash_model_name = 'togethercomputer/LLaMA-2-7B-32K--modeling_flash_llama.LlamaForCausalLM'
+        flash_model_name = 'sl-alex/flash_llama--modeling_flash_llama.LlamaForCausalLM'
         if 'num_key_value_heads' not in config.__dict__:
             updates['num_key_value_heads'] = config.num_attention_heads
         if 'auto_map' in config.__dict__:
