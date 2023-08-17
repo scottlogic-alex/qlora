@@ -50,7 +50,7 @@ class MemoryUsageCallback(TrainerCallback):
 
         overall_torch_used = 0
         overall_torch_used_plus_reserved_bytes = 0
-        print('Torch memory stats (used, reserved):')
+        print('Torch memory stats (allocated, reserved):')
         for did in range(len(self.handles)):
             used_bytes, used_plus_reserved_bytes = torch_memory_usage(did)
             overall_torch_used += used_bytes
