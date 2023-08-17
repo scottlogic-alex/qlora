@@ -235,6 +235,10 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
         default=80000,
         metadata={"help": "Free memory per gpu."}
     )
+    device_map_auto: Optional[bool] = field(
+        default=False,
+        metadata={"help": "use device_map='auto'. For sharding model across multiple GPUs."}
+    )
     report_to: str = field(
         default='none',
         metadata={"help": "To use wandb or something else for reporting."}
@@ -372,10 +376,12 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         
     max_memory = f'{args.max_memory_MB}MB'
     max_memory = {i: max_memory for i in range(n_gpus)}
-    device_map = {'': 0}
+    device_map = 'auto' if args.device_map_auto else {'': 0}
 
     # if we are in a distributed setting, we need to set the device map and max memory per device
     if os.environ.get('LOCAL_RANK', '-1') != '-1':
+        if args.device_map_auto:
+            raise ValueError("you have asked for device_map='auto' (pipeline parallelism) but you have also specified a LOCAL_RANK (distributed training). not sure what's the desired device_map in this situation, so aborting.")
         local_rank = int(os.environ.get('LOCAL_RANK'))
         device_map = {'': local_rank}
         max_memory = {'': max_memory[local_rank]}
