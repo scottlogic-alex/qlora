@@ -277,7 +277,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     torch_compile: bool = field(default=False)
     simulate_worst_case_seq_len: bool = field(default=False, metadata={"help": "pad prompts to maximum size, to help you measure the worst-case memory usage you'll experience in your dataset."})
     measure_memory: bool = field(default=False, metadata={"help": "Measures your VRAM usage at end of first step (i.e. after gradient accumulation)."})
-    terminate_after_first_step: bool = field(default=False, metadata={"help": "shuts down Python without saving a checkpoint, after first step. This is to be used in concert with --measure_memory, so you can measure the step cost then kill the run."})
+    terminate_after_step: Optional[int] = field(default=None, metadata={"help": "terminates Python after nth step. This is to be used in concert with --measure_memory, so you can measure the VRAM usage after n steps (2nd step should give you an indication of how your memory usage will look going forward, but you should run until 3rd step in order to verify that that's the case)."})
     metric_for_best_model: Optional[str] = field(default=None)
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
     generate_steps: Optional[int] = field(default=None, metadata={"help": 'How frequently to test generation with a representative prompt (and report result)'})
@@ -1043,8 +1043,8 @@ def train():
     if training_args.measure_memory:
         memory_usage_callback = MemoryUsageCallback()
         callbacks.append(memory_usage_callback)
-    if training_args.terminate_after_first_step:
-        terminate_callback = TerminateCallback()
+    if training_args.terminate_after_step is not None:
+        terminate_callback = TerminateCallback(training_args.terminate_after_step)
         callbacks.append(terminate_callback)
     trainer = Seq2SeqTrainer(
         model=model,
