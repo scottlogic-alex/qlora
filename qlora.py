@@ -397,7 +397,11 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         max_memory = {'': max_memory[local_rank]}
 
 
-    if args.full_finetune: assert args.bits in [16, 32]
+    if args.full_finetune: assert args.bits in [16, 32], "You have requested a full-finetune but your --bits is unsupported (please pick 16 or 32)."
+    if args.bits == 32:
+        assert not args.fp16 and not args.bf16, "You have requested to load model weights in 32-bit, so please remove flags --fp16 or --bf16."
+    else:
+        assert args.fp16 or args.bf16, "You have requested to load model weights in 16-bit, so please specify (via --fp16 or --bf16) what type of half-precision to use."
 
     print(f'loading base model config {args.model_name_or_path}...')
     config, _ = AutoConfig.from_pretrained(
