@@ -41,9 +41,14 @@ from transformers import (
 from transformers.training_args import OptimizerNames
 from datasets import load_dataset, Dataset, DatasetDict
 # evaluate.py clashes with package 'evaluate'
-sys.path.remove('')
+needs_restore_path = False
+if '' in sys.path:
+    sys.path.remove('')
+    needs_restore_path = True
 import evaluate
-sys.path.insert(0, '')
+if needs_restore_path:
+    sys.path.insert(0, '')
+    needs_restore_path = False
 
 from peft import (
     prepare_model_for_kbit_training,
