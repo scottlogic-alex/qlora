@@ -31,6 +31,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     BatchEncoding,
+    GenerationConfig,
     set_seed,
     Seq2SeqTrainer,
     TrainerCallback,
@@ -501,13 +502,16 @@ def get_accelerate_model(args, checkpoint_dir, lora_name_or_path: Optional[str] 
         # Note that these are present in the vocabulary.
         # Note also that `model.config.pad_token_id` is 0 which corresponds to `<unk>` token.
         print('Adding special tokens.')
-        tokenizer.add_special_tokens({
-            "eos_token": tokenizer.convert_ids_to_tokens(model.config.eos_token_id),
-            "bos_token": tokenizer.convert_ids_to_tokens(model.config.bos_token_id),
-            "unk_token": tokenizer.convert_ids_to_tokens(
-                model.config.pad_token_id if model.config.pad_token_id != -1 else tokenizer.pad_token_id
-            ),
-        })
+        special_token_ids_to_add: Dict[str, Optional[int]] = {
+            'eos_token': model.config.eos_token_id,
+            'bos_token': model.config.bos_token_id,
+            'unk_token': model.config.pad_token_id if model.config.pad_token_id != -1 else tokenizer.pad_token_id,
+        }
+        # model configs such as meta-llama/Llama-2-7b-chat-hf will give token ids such as {'unk_token':  None}, whose token string we cannot look up and thus cannot add as a special token.
+        special_tokens_to_add: Dict[str, str] = {
+            token_name: tokenizer.convert_ids_to_tokens(token_id) for token_name, token_id in special_token_ids_to_add.items() if token_id is not None
+        }
+        tokenizer.add_special_tokens(special_tokens_to_add)
     
     if not args.full_finetune:
         if args.bits in [4, 8]:
@@ -977,7 +981,10 @@ def train():
     ))
     model_args, data_args, training_args, generation_args, extra_args = \
         hfparser.parse_args_into_dataclasses(return_remaining_strings=True)
-    training_args.generation_config = transformers.GenerationConfig(**vars(generation_args))
+    training_args = TrainingArguments(**{
+        **training_args.to_dict(),
+        'generation_config': GenerationConfig(**vars(generation_args))
+    })
     args = argparse.Namespace(
         **vars(model_args), **vars(data_args), **vars(training_args)
     )
