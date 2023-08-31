@@ -63,6 +63,7 @@ from safetensors.torch import save_file
 from src.gen_callback import GenerationCallback
 from src.memory_usage_callback import MemoryUsageCallback
 from src.terminate_callback import TerminateCallback
+from src.flops_callback import FlopsCallback
 from src.collation import CollatedData, DataInstance
 from src.truncation_side import truncation_side
 
@@ -283,6 +284,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     torch_compile: bool = field(default=False)
     simulate_worst_case_seq_len: bool = field(default=False, metadata={"help": "pad prompts to maximum size, to help you measure the worst-case memory usage you'll experience in your dataset."})
     measure_memory: bool = field(default=False, metadata={"help": "Measures your VRAM usage at end of first step (i.e. after gradient accumulation)."})
+    measure_flops: bool = field(default=False, metadata={"help": "Measures FLOPs (FLOs incurred between on_step_begin and on_step_end)."})
     terminate_after_step: Optional[int] = field(default=None, metadata={"help": "terminates Python after nth step. This is to be used in concert with --measure_memory, so you can measure the VRAM usage after n steps (2nd step should give you an indication of how your memory usage will look going forward, but you should run until 3rd step in order to verify that that's the case)."})
     metric_for_best_model: Optional[str] = field(default=None)
     torch_compile_mode: Optional[Literal['default', 'reduce-overhead', 'max-autotune']] = field(default=None)
@@ -1041,6 +1043,9 @@ def train():
             }
         )
     callbacks: List[TrainerCallback] = []
+    if training_args.measure_flops:
+        flops_callback = FlopsCallback()
+        callbacks.append(flops_callback)
     if training_args.generate_steps is not None:
         assert args.dataset_format == 'prm800k-solutions', 'in-run continuation of representative prompts is only implemented for prm800k-solutions dataset_format'
         gen_callback = GenerationCallback(
