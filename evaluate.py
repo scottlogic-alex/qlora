@@ -85,6 +85,10 @@ class ModelArguments:
   model_name_or_path: Optional[str] = field(
     default="huggyllama/llama-7b"
   )
+  use_flash_llama: Optional[bool] = field(
+    default=False,
+    metadata={"help": "Loads LLaMA models via flash attn 2."}
+  )
   tokenizer_model_name_or_path: Optional[str] = field(
     default="huggyllama/llama-7b"
   )
@@ -217,6 +221,22 @@ def get_model(args: ModelArguments) -> LlamaForCausalLM:
     args.model_name_or_path,
     trust_remote_code=args.trust_remote_code,
   )
+  if args.use_flash_llama and config.model_type == 'llama':
+    updates: Dict[str, Union[str, int, float, bool, None]] = {}
+    flash_model_name = 'sl-alex/flash_llama--modeling_flash_llama.LlamaForCausalLM'
+    if 'num_key_value_heads' not in config.__dict__:
+      updates['num_key_value_heads'] = config.num_attention_heads
+    if 'auto_map' in config.__dict__:
+      if not ('AutoModelForCausalLM' in config.auto_map and 'flash' in config.auto_map['AutoModelForCausalLM']):
+        updates['auto_map']['AutoModelForCausalLM'] = flash_model_name
+    else:
+      updates['auto_map'] = { 'AutoModelForCausalLM': flash_model_name }
+    if 'rope_scaling' not in config.__dict__:
+      updates['rope_scaling'] = { 'factor': (args.source_max_len + args.target_max_len)/config.max_position_embeddings, 'type': 'linear' }
+    if 'pretraining_tp' not in config.__dict__:
+      updates['pretraining_tp'] = 1
+    if updates:
+      config.update(updates)
   cuda_avail = torch.cuda.is_available()
   load_in_4bit = args.bits == 4 and cuda_avail
   load_in_8bit = args.bits == 8 and cuda_avail
