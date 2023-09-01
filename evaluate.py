@@ -288,7 +288,8 @@ def main():
   tokenizer: LlamaTokenizerFast = AutoTokenizer.from_pretrained(
     model_args.tokenizer_model_name_or_path or model_args.model_name_or_path,
     cache_dir=misc_args.tokenizer_cache_dir,
-    use_fast = False,
+    # fast tokenizer required for WizardLM/WizardCoder-Python-34B-V1.0
+    use_fast = True,
     tokenizer_type='llama' if 'llama' in (model_args.tokenizer_model_name_or_path or model_args.model_name_or_path) else None, # Needed for HF name change
   )
   if 'falcon' in model_args.tokenizer_model_name_or_path:
