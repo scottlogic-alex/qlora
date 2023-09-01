@@ -122,7 +122,7 @@ class ModelArguments:
   )
   bits: int = field(
     default=4,
-    metadata={"help": "How many bits to use."}
+    metadata={"help": "How many bits to use.", "choices": [4, 8, 16, 32]}
   )
   model_dtype: DtypeLiteral = field(
     default=Dtype.Fp16.value,
@@ -243,7 +243,7 @@ def get_model(args: ModelArguments) -> LlamaForCausalLM:
 
   bnb_compute_dtype: torch.dtype = reify_dtype(args.bnb_compute_dtype)
 
-  quantization_config = BitsAndBytesConfig(
+  quantization_config: Optional[BitsAndBytesConfig] = BitsAndBytesConfig(
     load_in_4bit=load_in_4bit,
     load_in_8bit=load_in_8bit,
     llm_int8_threshold=6.0,
@@ -251,7 +251,7 @@ def get_model(args: ModelArguments) -> LlamaForCausalLM:
     bnb_4bit_compute_dtype=bnb_compute_dtype,
     bnb_4bit_use_double_quant=args.double_quant,
     bnb_4bit_quant_type=args.quant_type,
-  ) if cuda_avail else None
+  ) if cuda_avail and args.bits in [4, 8] else None
 
   if not cuda_avail:
     logger.warning("You don't have CUDA, so we have turned off quantization. If you happen to be on a Mac: you probably have enough unified memory to run in fp16 anyway…")
