@@ -25,7 +25,7 @@ from time import perf_counter
 
 from transformers import AutoTokenizer
 from safetensors.torch import load_file
-from typing import Optional, OrderedDict, Literal
+from typing import Optional, OrderedDict, Literal, Union
 
 from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from src.stop_on_tokens import StopOnTokens
