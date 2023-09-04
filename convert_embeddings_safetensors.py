@@ -23,6 +23,4 @@ with safe_open(out_path, framework='pt', device='cpu') as f:
   loaded_tensors: Dict[str, Tensor] = {}
   for key in f.keys():
     loaded_tensors[key] = f.get_tensor(key)
-    pass
-  pass
 print(loaded_tensors)
