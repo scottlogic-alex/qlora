@@ -285,11 +285,28 @@ def main():
 
   model: LlamaForCausalLM = get_model(model_args)
 
-  tokenizer: LlamaTokenizerFast = AutoTokenizer.from_pretrained(
-    model_args.tokenizer_model_name_or_path or model_args.model_name_or_path,
-    cache_dir=misc_args.tokenizer_cache_dir,
+  tokenizer_name: str = model_args.tokenizer_model_name_or_path or model_args.model_name_or_path
+
+  needs_fast = [
     # fast tokenizer required for WizardLM/WizardCoder-Python-34B-V1.0, because slow tokenizer doesn't come with added_tokens (required for {'[PAD]': 32000})
-    use_fast = True,
+    'WizardCoder'
+  ]
+  needs_slow = [
+    # slow tokenizer required, because fast tokenizer tokenizes </s> to ['</', 's', '>']
+    'minihf_evaluator_openllama_7b'
+  ]
+
+  # defaults to False simply because artidoro/qlora.py does ("Fast tokenizer giving issues.")
+  use_fast = False
+  for pattern in needs_fast:
+    use_fast |= pattern in tokenizer_name
+  for pattern in needs_slow:
+    use_fast &= (pattern not in tokenizer_name)
+
+  tokenizer: LlamaTokenizer | LlamaTokenizerFast = AutoTokenizer.from_pretrained(
+    tokenizer_name,
+    cache_dir=misc_args.tokenizer_cache_dir,
+    use_fast=use_fast,
     tokenizer_type='llama' if 'llama' in (model_args.tokenizer_model_name_or_path or model_args.model_name_or_path) else None, # Needed for HF name change
   )
   if 'falcon' in model_args.tokenizer_model_name_or_path:
