@@ -389,7 +389,16 @@ def main():
     torch.compile(model, mode='max-autotune')
 
   # stop_token_ids: List[int] = tokenizer.convert_tokens_to_ids(["<|im_end|>", "<|endoftext|>"])
-  stop_token_ids: List[int] = [tokenizer.eos_token_id, *tokenizer.convert_tokens_to_ids([process_supervision_tokens['answer_end']])]
+  stop_token_ids: List[int] = [tokenizer.eos_token_id]
+
+  # process supervision tokens for models such as sl-alex/llama-13b-alpaca-stepwise-lora-embtuned
+  answer_end_id: int = tokenizer.convert_tokens_to_ids(process_supervision_tokens['answer_end'])
+  if answer_end_id != tokenizer.unk_token_id:
+    stop_token_ids.append(answer_end_id)
+
+  if 'minihf_evaluator_openllama_7b' in tokenizer_name:
+    # evaluator was trained with a cursed fast tokenizer which tokenized </eos> to ['</', 's', '>']
+    stop_token_ids.append(tokenizer.convert_tokens_to_ids('</'))
   stop = StopOnTokens(stop_token_ids)
   stopping_criteria=StoppingCriteriaList([stop])
 
