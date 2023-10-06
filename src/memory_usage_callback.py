@@ -2,7 +2,7 @@
 # pip install nvidia-ml-py
 import pynvml as nvml
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
-from typing import NamedTuple
+from typing import NamedTuple, List
 import torch
 
 def to_MiB(bytes: int) -> int:
@@ -26,38 +26,48 @@ def torch_memory_usage(device=0) -> TorchMemoryStats:
     return TorchMemoryStats(used_bytes=used, used_plus_reserved_bytes=used_plus_reserved)
 
 class MemoryUsageCallback(TrainerCallback):
+    visible_nvml_device_ixs: List[int]
     def __init__(self) -> None:
         super().__init__()
         nvml.nvmlInit()
         device_count: int = nvml.nvmlDeviceGetCount()
         self.handles = [nvml.nvmlDeviceGetHandleByIndex(did) for did in range(device_count)]
+        # if you use `CUDA_VISIBLE_DEVICES` to hide devices: nvml will see them but torch won't.
+        # for example, if you have 2xA40 (NVML device 0 and device 1),
+        # CUDA_VISIBLE_DEVICES=1 will hide nvml device 0.
+        # so cuda:0 will correspond to nvml device 1.
+        self.visible_nvml_device_ixs = [torch.cuda._get_nvml_device_index(ix) for ix in range(torch.cuda.device_count())]
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        torch.cuda.synchronize()
         overall_nvml_used = 0
         overall_nvml_total = 0
-        print('NVML memory stats (used+reserved, all processes):')
-        for did, handle in enumerate(self.handles):
-            used_bytes, total_bytes = nvml_memory_usage(handle)
+        print(f'step {state.global_step}\n  NVML memory stats (used+reserved, all processes):')
+        # for did, handle in enumerate(self.handles):
+        for nvml_did in self.visible_nvml_device_ixs:
+            nvml_handle = self.handles[nvml_did]
+            used_bytes, total_bytes = nvml_memory_usage(nvml_handle)
             overall_nvml_used += used_bytes
             overall_nvml_total += total_bytes
             # you'll notice this is slightly higher than the summary you get in nvidia-smi.
             # that's because it's used + reserved.
             # you can compute used+reserved via nvidia-smi yourself:
             # nvidia-smi -i 0 -q -d MEMORY
-            print(f'  Device {did}: Used {to_MiB(used_bytes)}MiB / {to_MiB(total_bytes)}MiB')
-        if len(self.handles) > 1:
-            print(f'  Overall: Used {to_MiB(overall_nvml_used)}MiB / {to_MiB(overall_nvml_total)}MiB')
+            print(f'    Device {nvml_did}: Used {to_MiB(used_bytes)}MiB / {to_MiB(total_bytes)}MiB')
+        if len(self.visible_nvml_device_ixs) > 1:
+            print(f'    Overall: Used {to_MiB(overall_nvml_used)}MiB / {to_MiB(overall_nvml_total)}MiB')
 
         overall_torch_used = 0
         overall_torch_used_plus_reserved_bytes = 0
-        print('Torch memory stats (allocated, reserved):')
-        for did in range(len(self.handles)):
-            used_bytes, used_plus_reserved_bytes = torch_memory_usage(did)
+        print('  Torch memory stats (allocated, reserved):')
+        for torch_did in range(torch.cuda.device_count()):
+            nvml_did: int = self.visible_nvml_device_ixs[torch_did]
+            used_bytes, used_plus_reserved_bytes = torch_memory_usage(torch_did)
             overall_torch_used += used_bytes
             overall_torch_used_plus_reserved_bytes += used_plus_reserved_bytes
             # Allocated/resident includes stuff like optimizer state
             # Reserved includes temporary state like gradients
-            print(f'  Device {did}: Used {to_MiB(used_plus_reserved_bytes)}MiB (Allocated: {to_MiB(used_bytes)}MiB, Reserved {to_MiB(used_plus_reserved_bytes-used_bytes)}MiB)')
-        if len(self.handles) > 1:
-            print(f'  Overall: Used {to_MiB(overall_torch_used_plus_reserved_bytes)}MiB (Allocated: {to_MiB(overall_torch_used)}MiB, Reserved {to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used)}MiB)')
+            print(f'    Device {nvml_did}: Used {to_MiB(used_plus_reserved_bytes)}MiB (Allocated: {to_MiB(used_bytes)}MiB, Reserved {to_MiB(used_plus_reserved_bytes-used_bytes)}MiB)')
+        if len(self.visible_nvml_device_ixs) > 1:
+            print(f'    Overall: Used {to_MiB(overall_torch_used_plus_reserved_bytes)}MiB (Allocated: {to_MiB(overall_torch_used)}MiB, Reserved {to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used)}MiB)')
 
