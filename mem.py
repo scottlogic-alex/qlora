@@ -37,10 +37,6 @@ print(f'batch={batch_size}')
 use_mixed = False
 print(f'precision: {"mixed" if use_mixed else "uniform"}')
 
-x = torch.randn(batch_size, in_dim, device=device, requires_grad=True)
-y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
-print(f'after declare x/y: {mem()}')
-
 model = Linear(in_features=in_dim, out_features=out_dim, device=device, bias=False)
 print(f'after declare model: {mem()}')
 
@@ -61,6 +57,11 @@ for step in range(steps):
   for microstep in range(microsteps):
     microstep_indicator = f'[microstep {microstep}] ' if microsteps > 1 else ''
     step_and_micro_indicator = f'{step_indicator}{microstep_indicator}'
+
+    x = torch.randn(batch_size, in_dim, device=device, requires_grad=True)
+    y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
+    print(pretty_mem(step_and_micro_indicator, f'after declare x/y:'))
+
     with precision_ctx:
       y_pred = model.forward(x)
       # y_pred.retain_grad()
@@ -76,6 +77,7 @@ for step in range(steps):
       loss /= microsteps
     loss.backward()
     print(pretty_mem(step_and_micro_indicator, f'after backward:'))
+    del x.grad
 
   optim.step()
   print(f'{step_indicator}after optim.step: {mem()}')
