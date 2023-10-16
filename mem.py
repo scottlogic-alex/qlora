@@ -34,6 +34,9 @@ out_dim = 4096
 batch_size = 4096
 print(f'batch={batch_size}')
 
+use_mixed = False
+print(f'precision: {"mixed" if use_mixed else "uniform"}')
+
 x = torch.randn(batch_size, in_dim, device=device, requires_grad=True)
 y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
 print(f'after declare x/y: {mem()}')
@@ -44,14 +47,12 @@ print(f'after declare model: {mem()}')
 # optim = AdamW(model.parameters(), lr=2e-5)
 momentum=0.
 optim = SGD(model.parameters(), lr=2e-5, momentum=momentum)
-optim_extra_desc = f', momentum={momentum}' if isinstance(optim, SGD) else ''
+optim_extra_desc = f', mom={momentum}' if isinstance(optim, SGD) else ''
 print(f'after declare optim ({type(optim).__name__}{optim_extra_desc}): {mem()}')
 
 loss_fn = MSELoss()
 
-use_mixed = False
 precision_ctx = autocast(dtype=torch.bfloat16, cache_enabled=True) if use_mixed else nullcontext()
-print(f'precision: {"mixed" if use_mixed else "uniform"}')
 
 steps = 1
 microsteps = 2
@@ -82,7 +83,15 @@ for step in range(steps):
   optim.zero_grad(set_to_none=set_to_none)
   print(f'{step_indicator}after optim.zero_grad ({set_to_none}): {mem()}')
 
-print(f'model  (f32): {mib_str(model.weight.numel()*4)}\nmodel  (f16): {mib_str(model.weight.numel()*2)}\nx      (f32): {mib_str(x.numel()*4)}\ny_true (f32): {mib_str(y_true.numel()*4)}\ny_pred (f16): {mib_str(y_pred.numel()*2)}')
+print(f'model  (f32): {mib_str(model.weight.numel()*4)}')
+if use_mixed:
+  print(f'model  (f16): {mib_str(model.weight.numel()*2)}')
+print(f'x      (f32): {mib_str(x.numel()*4)}')
+print(f'y_true (f32): {mib_str(y_true.numel()*4)}')
+if use_mixed:
+  print(f'y_pred (f16): {mib_str(y_pred.numel()*2)}')
+else:
+  print(f'y_pred (f32): {mib_str(y_pred.numel()*4)}')
 # torch.cuda.memory_snapshot()
 # [(f"{m['address']:02x}"[3:-5], mib_str(m['allocated_size'])) for m in torch.cuda.memory_snapshot()]
 # print('\n'.join([f"""{f"{m['address']:02x}"[3:-5]}: {mib_str(m['allocated_size']).rjust(9)} alloc""" for m in torch.cuda.memory_snapshot()]))
