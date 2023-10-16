@@ -40,6 +40,9 @@ print(f'precision: {"mixed" if use_mixed else "uniform"}')
 realloc_each_microstep = True
 print(f'realloc_each_microstep: {realloc_each_microstep}')
 
+optim_set_to_none=True
+print(f'optim_set_to_none: {optim_set_to_none}')
+
 model = Linear(in_features=in_dim, out_features=out_dim, device=device, bias=False)
 print(f'after declare model: {mem()}')
 
@@ -85,9 +88,9 @@ for step in range(steps):
 
   optim.step()
   print(f'{step_indicator}after optim.step: {mem()}')
-  set_to_none=False
-  optim.zero_grad(set_to_none=set_to_none)
-  print(f'{step_indicator}after optim.zero_grad ({set_to_none}): {mem()}')
+  
+  optim.zero_grad(set_to_none=optim_set_to_none)
+  print(f'{step_indicator}after optim.zero_grad ({optim_set_to_none}): {mem()}')
 
 print(f'model  (f32): {mib_str(model.weight.numel()*4)}')
 if use_mixed:
