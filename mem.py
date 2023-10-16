@@ -37,6 +37,9 @@ print(f'batch={batch_size}')
 use_mixed = False
 print(f'precision: {"mixed" if use_mixed else "uniform"}')
 
+realloc_each_microstep = True
+print(f'realloc_each_microstep: {realloc_each_microstep}')
+
 model = Linear(in_features=in_dim, out_features=out_dim, device=device, bias=False)
 print(f'after declare model: {mem()}')
 
@@ -58,9 +61,10 @@ for step in range(steps):
     microstep_indicator = f'[microstep {microstep}] ' if microsteps > 1 else ''
     step_and_micro_indicator = f'{step_indicator}{microstep_indicator}'
 
-    x = torch.randn(batch_size, in_dim, device=device, requires_grad=True)
-    y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
-    print(pretty_mem(step_and_micro_indicator, f'after declare x/y:'))
+    if realloc_each_microstep or step == 0 and microstep == 0:
+      x = torch.randn(batch_size, in_dim, device=device, requires_grad=True)
+      y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
+      print(pretty_mem(step_and_micro_indicator, f'after declare x/y:'))
 
     with precision_ctx:
       y_pred = model.forward(x)
@@ -88,12 +92,12 @@ for step in range(steps):
 print(f'model  (f32): {mib_str(model.weight.numel()*4)}')
 if use_mixed:
   print(f'model  (f16): {mib_str(model.weight.numel()*2)}')
-print(f'x      (f32): {mib_str(x.numel()*4)}')
-print(f'y_true (f32): {mib_str(y_true.numel()*4)}')
+print(f'x      (f32): {mib_str(batch_size*in_dim*4)}')
+print(f'y_true (f32): {mib_str(batch_size*out_dim*4)}')
 if use_mixed:
-  print(f'y_pred (f16): {mib_str(y_pred.numel()*2)}')
+  print(f'y_pred (f16): {mib_str(batch_size*out_dim*2)}')
 else:
-  print(f'y_pred (f32): {mib_str(y_pred.numel()*4)}')
+  print(f'y_pred (f32): {mib_str(batch_size*out_dim*4)}')
 # torch.cuda.memory_snapshot()
 # [(f"{m['address']:02x}"[3:-5], mib_str(m['allocated_size'])) for m in torch.cuda.memory_snapshot()]
 # print('\n'.join([f"""{f"{m['address']:02x}"[3:-5]}: {mib_str(m['allocated_size']).rjust(9)} alloc""" for m in torch.cuda.memory_snapshot()]))
