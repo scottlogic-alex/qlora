@@ -106,7 +106,7 @@ for step in range(steps):
     step_and_micro_indicator = f'{step_indicator}{microstep_indicator}'
 
     if realloc_each_microstep or step == 0 and microstep == 0:
-      x = torch.randn(batch_size, in_dim, device=device, requires_grad=True)
+      x = torch.randn(batch_size, in_dim, device=device, requires_grad=False)
       y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
       print(pretty_mem(step_and_micro_indicator, f'after declare x/y:'))
 
@@ -125,8 +125,6 @@ for step in range(steps):
       loss /= microsteps
     loss.backward()
     print(pretty_mem(step_and_micro_indicator, f'after backward:'))
-    del x.grad
-    print(f'{step_indicator}after del x.grad: {mem()}')
 
   optim.step()
   print(f'{step_indicator}after optim.step: {mem()}')
