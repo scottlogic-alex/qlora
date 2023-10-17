@@ -113,7 +113,7 @@ for step in range(steps):
     with precision_ctx:
       y_pred = model.forward(x)
       # y_pred.retain_grad()
-      print(pretty_mem(step_and_micro_indicator, f'after model.forward:'))
+      # print(pretty_mem(step_and_micro_indicator, f'after model.forward:'))
 
       # y_pred2 = y_pred.float()
       # print(f'after y_pred cast: {mem()}')
@@ -126,6 +126,7 @@ for step in range(steps):
     loss.backward()
     print(pretty_mem(step_and_micro_indicator, f'after backward:'))
     del x.grad
+    print(f'{step_indicator}after del x.grad: {mem()}')
 
   optim.step()
   print(f'{step_indicator}after optim.step: {mem()}')
