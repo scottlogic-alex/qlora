@@ -53,9 +53,9 @@ class MemoryUsageCallback(TrainerCallback):
             # that's because it's used + reserved.
             # you can compute used+reserved via nvidia-smi yourself:
             # nvidia-smi -i 0 -q -d MEMORY
-            print(f'    Device {nvml_did}: Used {to_MiB(used_bytes)}MiB / {to_MiB(total_bytes)}MiB')
+            print(f'    Device {nvml_did}: Used {to_MiB(used_bytes)} MiB / {to_MiB(total_bytes)} MiB')
         if len(self.visible_nvml_device_ixs) > 1:
-            print(f'    Overall: Used {to_MiB(overall_nvml_used)}MiB / {to_MiB(overall_nvml_total)}MiB')
+            print(f'    Overall: Used {to_MiB(overall_nvml_used)} MiB / {to_MiB(overall_nvml_total)} MiB')
 
         overall_torch_used = 0
         overall_torch_used_plus_reserved_bytes = 0
@@ -67,7 +67,7 @@ class MemoryUsageCallback(TrainerCallback):
             overall_torch_used_plus_reserved_bytes += used_plus_reserved_bytes
             # Allocated/resident includes stuff like optimizer state
             # Reserved includes temporary state like gradients
-            print(f'    Device {nvml_did}: Used {to_MiB(used_plus_reserved_bytes)}MiB (Allocated: {to_MiB(used_bytes)}MiB, Reserved {to_MiB(used_plus_reserved_bytes-used_bytes)}MiB)')
+            print(f'    Device {nvml_did}: Used {to_MiB(used_plus_reserved_bytes)} MiB (Allocated: {to_MiB(used_bytes)} MiB, Reserved {to_MiB(used_plus_reserved_bytes-used_bytes)} MiB)')
         if len(self.visible_nvml_device_ixs) > 1:
-            print(f'    Overall: Used {to_MiB(overall_torch_used_plus_reserved_bytes)}MiB (Allocated: {to_MiB(overall_torch_used)}MiB, Reserved {to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used)}MiB)')
+            print(f'    Overall: Used {to_MiB(overall_torch_used_plus_reserved_bytes)} MiB (Allocated: {to_MiB(overall_torch_used)} MiB, Reserved {to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used)} MiB)')
 
