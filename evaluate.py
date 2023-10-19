@@ -309,9 +309,9 @@ def main():
     use_fast=use_fast,
     tokenizer_type='llama' if 'llama' in (model_args.tokenizer_model_name_or_path or model_args.model_name_or_path) else None, # Needed for HF name change
   )
-  if 'falcon' in model_args.tokenizer_model_name_or_path:
+  if 'falcon' in model_args.tokenizer_model_name_or_path or 'codellama/CodeLlama' in model_args.tokenizer_model_name_or_path:
     generation_config.eos_token_id = generation_config.pad_token_id = tokenizer.eos_token_id
-  if 'WizardLM/WizardCoder-Python-34B-V1.0' in model_args.tokenizer_model_name_or_path or 'codellama/CodeLlama' in model_args.tokenizer_model_name_or_path:
+  if 'WizardLM/WizardCoder-Python-34B-V1.0' in model_args.tokenizer_model_name_or_path:
     generation_config.pad_token_id = tokenizer.pad_token_id
 
   if 'llama' in model_args.tokenizer_model_name_or_path or isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
