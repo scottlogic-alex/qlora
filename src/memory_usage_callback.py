@@ -104,7 +104,7 @@ class MemoryUsageCallback(TrainerCallback):
             overall_torch_used_plus_reserved_bytes += torch_used_plus_reserved_bytes
             lines.append(f'D{nvml_did} Th {justify(to_MiB(torch_used_plus_reserved_bytes))} MiB {f"{torch_used_plus_reserved_bytes/self.param_count:.2f}".rjust(5)}b/p (Al {justify(to_MiB(torch_used_bytes))} MiB, Rsrv {justify(to_MiB(torch_used_plus_reserved_bytes-torch_used_bytes))} MiB), NVML {justify(to_MiB(nvml_used_bytes))} / {justify(to_MiB(nvml_total_bytes))} MiB (ovrhed {justify(to_MiB(nvml_used_bytes-torch_used_plus_reserved_bytes))})')
         if len(self.visible_nvml_device_ixs) > 1:
-            lines.append(f'A=  Th {justify(to_MiB(overall_torch_used_plus_reserved_bytes))} MiB {f"{overall_torch_used_plus_reserved_bytes/self.param_count:.2f}".rjust(5)}b/p (Al {justify(to_MiB(overall_torch_used_bytes))} MiB, Rsrv {justify(to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used_bytes))} MiB), NVML {justify(to_MiB(overall_nvml_used_bytes))} / {justify(to_MiB(overall_nvml_total_bytes))} MiB (ovrhed {justify(to_MiB(overall_nvml_used_bytes-overall_torch_used_plus_reserved_bytes))})')
+            lines.append(f'A= Th {justify(to_MiB(overall_torch_used_plus_reserved_bytes))} MiB {f"{overall_torch_used_plus_reserved_bytes/self.param_count:.2f}".rjust(5)}b/p (Al {justify(to_MiB(overall_torch_used_bytes))} MiB, Rsrv {justify(to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used_bytes))} MiB), NVML {justify(to_MiB(overall_nvml_used_bytes))} / {justify(to_MiB(overall_nvml_total_bytes))} MiB (ovrhed {justify(to_MiB(overall_nvml_used_bytes-overall_torch_used_plus_reserved_bytes))})')
         first, *rest = lines
         out: str = '\n'.join((
             f'{qualifier} {first}',
