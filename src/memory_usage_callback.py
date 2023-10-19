@@ -123,7 +123,7 @@ class MemoryUsageCallback(TrainerCallback):
     
     def on_substep_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         torch.cuda.synchronize()
-        print(self.make_memory_str(f'step {state.global_step}, microstep {self.substep}'))
+        print(self.make_memory_str(f'step {state.global_step}, mstep {self.substep}'))
         self.substep += 1
     
     def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
@@ -131,7 +131,7 @@ class MemoryUsageCallback(TrainerCallback):
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         torch.cuda.synchronize()
-        microstep_detail = '(end)'.rjust(13) if self.substep or self.justify_empty_microstep_detail else ''
+        microstep_detail = '(end)'.rjust(9) if self.substep or self.justify_empty_microstep_detail else ''
         qualifier = f'step {state.global_step - 1}{microstep_detail}'
         print(self.make_memory_str(qualifier))
         
