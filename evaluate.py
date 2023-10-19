@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional, TypedDict, NamedTuple, List, Dict, TypeAlias
 import torch
 from torch import LongTensor, FloatTensor
-from torch.nn import Embedding, Linear
+from torch.nn import Embedding, Linear, Module
 from transformers import (
   AutoConfig,
   AutoModelForCausalLM,
@@ -16,6 +16,7 @@ from transformers import (
   LlamaTokenizer,
   LlamaTokenizerFast
 )
+from bitsandbytes.nn import Params4bit
 from peft import PeftModel, PeftModelForCausalLM
 import logging
 from enum import Enum
@@ -216,6 +217,27 @@ class GenerationArguments:
   length_penalty: Optional[float] = field(default=1.0)
   no_repeat_ngram_size: Optional[int] = field(default=0)
 
+def count_model_params(model: Module) -> int:
+  return sum([p.numel()*2 if isinstance(p, Params4bit) else p.numel() for p in model.parameters()])
+
+def llama_model_params(
+  hidden_dim: int,
+  intermediate_size: int,
+  hidden_layers: int,
+  q_heads: int,
+  kv_heads: Optional[int] = None,
+  head_dim=128,
+  vocab_size=32000,
+) -> int:
+  kv_heads = q_heads if kv_heads is None else kv_heads
+  embedding = unembedding = vocab_size*hidden_dim
+  q_proj = hidden_dim * q_heads*head_dim
+  k_proj = v_proj = hidden_dim * kv_heads*head_dim
+  o_proj = hidden_dim**2
+  gate_proj = up_proj = down_proj = hidden_dim * intermediate_size
+  input_layernorm = post_attn_layernorm = norm = hidden_dim
+  return embedding + hidden_layers * (q_proj + k_proj + v_proj + o_proj + gate_proj + up_proj + down_proj + input_layernorm + post_attn_layernorm) + norm + unembedding
+
 def get_model(args: ModelArguments) -> LlamaForCausalLM:
   config = AutoConfig.from_pretrained(
     args.model_name_or_path,
@@ -284,6 +306,23 @@ def main():
   generation_config = GenerationConfig(**vars(generation_args))
 
   model: LlamaForCausalLM = get_model(model_args)
+  print('model parameters:\n', count_model_params(model))
+
+  if model.config.model_type == 'llama':
+    # 7b looks like:
+    # llama_model_params(
+    #   hidden_dim=4096,
+    #   intermediate_size=11008,
+    #   hidden_layers=32,
+    #   q_heads=32,
+    # )
+    print('calculated params:\n', llama_model_params(
+      hidden_dim=model.config.hidden_size,
+      intermediate_size=model.config.intermediate_size,
+      hidden_layers=model.config.num_hidden_layers,
+      q_heads=model.config.num_attention_heads,
+      kv_heads=model.config.num_key_value_heads if hasattr(model.config, 'num_key_value_heads') else None,
+    ))
 
   tokenizer_name: str = model_args.tokenizer_model_name_or_path or model_args.model_name_or_path
 
