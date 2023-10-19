@@ -27,6 +27,7 @@ def torch_memory_usage(device=0) -> TorchMemoryStats:
 
 class MemoryUsageCallback(TrainerCallback):
     visible_nvml_device_ixs: List[int]
+    substep: int
     def __init__(self) -> None:
         super().__init__()
         nvml.nvmlInit()
@@ -37,12 +38,12 @@ class MemoryUsageCallback(TrainerCallback):
         # CUDA_VISIBLE_DEVICES=1 will hide nvml device 0.
         # so cuda:0 will correspond to nvml device 1.
         self.visible_nvml_device_ixs = [torch.cuda._get_nvml_device_index(ix) for ix in range(torch.cuda.device_count())]
+        self.substep = 0
 
-    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        torch.cuda.synchronize()
+    def print_memory(self, qualifier: str):
         overall_nvml_used = 0
         overall_nvml_total = 0
-        print(f'step {state.global_step}\n  NVML memory stats (used+reserved, all processes):')
+        print(f'{qualifier}\n  NVML memory stats (used+reserved, all processes):')
         # for did, handle in enumerate(self.handles):
         for nvml_did in self.visible_nvml_device_ixs:
             nvml_handle = self.handles[nvml_did]
@@ -70,4 +71,19 @@ class MemoryUsageCallback(TrainerCallback):
             print(f'    Device {nvml_did}: Used {to_MiB(used_plus_reserved_bytes)} MiB (Allocated: {to_MiB(used_bytes)} MiB, Reserved {to_MiB(used_plus_reserved_bytes-used_bytes)} MiB)')
         if len(self.visible_nvml_device_ixs) > 1:
             print(f'    Overall: Used {to_MiB(overall_torch_used_plus_reserved_bytes)} MiB (Allocated: {to_MiB(overall_torch_used)} MiB, Reserved {to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used)} MiB)')
+    
+    def on_substep_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        torch.cuda.synchronize()
+        self.print_memory(f'step {state.global_step}, microstep {self.substep}')
+        self.substep += 1
+    
+    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        self.substep = 0
+
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        torch.cuda.synchronize()
+        microstep_detail = '(end)'.rjust(13) if self.substep else ''
+        qualifier = f'step {state.global_step - 1}{microstep_detail}'
+        self.print_memory(qualifier)
+        
 
