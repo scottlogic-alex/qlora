@@ -16,7 +16,6 @@ from transformers import (
   LlamaTokenizer,
   LlamaTokenizerFast
 )
-from bitsandbytes.nn import Params4bit
 from peft import PeftModel, PeftModelForCausalLM
 import logging
 from enum import Enum
@@ -30,6 +29,7 @@ from typing import Optional, OrderedDict, Literal, Union
 
 from src.callback_text_iterator_streamer import CallbackTextIteratorStreamer
 from src.stop_on_tokens import StopOnTokens
+from src.model_params import count_model_params
 
 logger = logging.getLogger(__name__)
 
@@ -216,9 +216,6 @@ class GenerationArguments:
   repetition_penalty: Optional[float] = field(default=1.0)
   length_penalty: Optional[float] = field(default=1.0)
   no_repeat_ngram_size: Optional[int] = field(default=0)
-
-def count_model_params(model: Module) -> int:
-  return sum([p.numel()*2 if isinstance(p, Params4bit) else p.numel() for p in model.parameters()])
 
 def llama_model_params(
   hidden_dim: int,
