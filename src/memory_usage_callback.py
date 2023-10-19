@@ -3,11 +3,13 @@ from __future__ import annotations
 # pip install nvidia-ml-py
 import pynvml as nvml
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
-from typing import NamedTuple, List, Callable
+from typing import NamedTuple, List, Callable, Optional
 import torch
 
-def justify(bytes: int) -> str:
-    return str(bytes).rjust(5)
+from .model_params import count_model_params
+
+def justify(bytes: int, width=5) -> str:
+    return str(bytes).rjust(width)
 
 def to_MiB(bytes: int) -> int:
     return bytes >> 20
@@ -35,6 +37,7 @@ class MemoryUsageCallback(TrainerCallback):
     make_memory_str: Callable[[MemoryUsageCallback, str], str]
     # when grad acc is disabled: there is no microstep detail to print. set True to justify to the same width anyway, to make results easier to compare
     justify_empty_microstep_detail: bool
+    param_count: Optional[int]
     def __init__(self, brief=True) -> None:
         super().__init__()
         nvml.nvmlInit()
@@ -48,6 +51,7 @@ class MemoryUsageCallback(TrainerCallback):
         self.substep = 0
         self.make_memory_str = self.make_memory_str_brief if brief else self.make_memory_str_
         self.justify_empty_microstep_detail = True
+        self.param_count = None
 
     def make_memory_str_(self, qualifier: str) -> str:
         overall_nvml_used = 0
@@ -98,15 +102,24 @@ class MemoryUsageCallback(TrainerCallback):
             torch_used_bytes, torch_used_plus_reserved_bytes = torch_memory_usage(torch_did)
             overall_torch_used_bytes += torch_used_bytes
             overall_torch_used_plus_reserved_bytes += torch_used_plus_reserved_bytes
-            lines.append(f'Device {nvml_did}: Torch Used {justify(to_MiB(torch_used_plus_reserved_bytes))} MiB (Allocated: {justify(to_MiB(torch_used_bytes))} MiB, Reserved {justify(to_MiB(torch_used_plus_reserved_bytes-torch_used_bytes))} MiB), NVML {justify(to_MiB(nvml_used_bytes))} / {justify(to_MiB(nvml_total_bytes))} MiB (overhead {justify(to_MiB(nvml_used_bytes-torch_used_plus_reserved_bytes))})')
+            lines.append(f'D{nvml_did} Th {justify(to_MiB(torch_used_plus_reserved_bytes))} MiB {f"{torch_used_plus_reserved_bytes/self.param_count:.2f}".rjust(5)}b/p (Al {justify(to_MiB(torch_used_bytes))} MiB, Rsrv {justify(to_MiB(torch_used_plus_reserved_bytes-torch_used_bytes))} MiB), NVML {justify(to_MiB(nvml_used_bytes))} / {justify(to_MiB(nvml_total_bytes))} MiB (ovrhed {justify(to_MiB(nvml_used_bytes-torch_used_plus_reserved_bytes))})')
         if len(self.visible_nvml_device_ixs) > 1:
-            lines.append(f'Overall:  Torch Used {justify(to_MiB(overall_torch_used_plus_reserved_bytes))} MiB (Allocated: {justify(to_MiB(overall_torch_used_bytes))} MiB, Reserved {justify(to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used_bytes))} MiB), NVML {justify(to_MiB(overall_nvml_used_bytes))} / {justify(to_MiB(overall_nvml_total_bytes))} MiB (overhead {justify(to_MiB(overall_nvml_used_bytes-overall_torch_used_plus_reserved_bytes))})')
+            lines.append(f'A=  Th {justify(to_MiB(overall_torch_used_plus_reserved_bytes))} MiB {f"{overall_torch_used_plus_reserved_bytes/self.param_count:.2f}".rjust(5)}b/p (Al {justify(to_MiB(overall_torch_used_bytes))} MiB, Rsrv {justify(to_MiB(overall_torch_used_plus_reserved_bytes-overall_torch_used_bytes))} MiB), NVML {justify(to_MiB(overall_nvml_used_bytes))} / {justify(to_MiB(overall_nvml_total_bytes))} MiB (ovrhed {justify(to_MiB(overall_nvml_used_bytes-overall_torch_used_plus_reserved_bytes))})')
         first, *rest = lines
         out: str = '\n'.join((
             f'{qualifier} {first}',
             *(f'{spacer} {line}' for line in rest)
         ))
         return out
+    
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        self.param_count = count_model_params(kwargs['model'])
+        emptystr=''
+        s = 's'
+        print('\n'.join((
+            f'model params: {self.param_count}',
+            *(f'{str(p).rjust(2)} {f"byte{s if p != 1 else emptystr}/param".ljust(11)} = {justify(to_MiB(self.param_count)*p, width=6)} MiB' for p in (1, 2, 4, 8, 10, 12, 14, 16, 18, 20))
+        )))
     
     def on_substep_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         torch.cuda.synchronize()
