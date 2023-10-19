@@ -33,6 +33,8 @@ class MemoryUsageCallback(TrainerCallback):
     visible_nvml_device_ixs: List[int]
     substep: int
     make_memory_str: Callable[[MemoryUsageCallback, str], str]
+    # when grad acc is disabled: there is no microstep detail to print. set True to justify to the same width anyway, to make results easier to compare
+    justify_empty_microstep_detail: bool
     def __init__(self, brief=True) -> None:
         super().__init__()
         nvml.nvmlInit()
@@ -45,6 +47,7 @@ class MemoryUsageCallback(TrainerCallback):
         self.visible_nvml_device_ixs = [torch.cuda._get_nvml_device_index(ix) for ix in range(torch.cuda.device_count())]
         self.substep = 0
         self.make_memory_str = self.make_memory_str_brief if brief else self.make_memory_str_
+        self.justify_empty_microstep_detail = True
 
     def make_memory_str_(self, qualifier: str) -> str:
         overall_nvml_used = 0
@@ -115,7 +118,7 @@ class MemoryUsageCallback(TrainerCallback):
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         torch.cuda.synchronize()
-        microstep_detail = '(end)'.rjust(13) if self.substep else ''
+        microstep_detail = '(end)'.rjust(13) if self.substep or self.justify_empty_microstep_detail else ''
         qualifier = f'step {state.global_step - 1}{microstep_detail}'
         print(self.make_memory_str(qualifier))
         
