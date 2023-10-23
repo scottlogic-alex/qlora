@@ -1,13 +1,13 @@
 from __future__ import annotations
 import torch
-from torch import BoolTensor, LongTensor, FloatTensor
+from torch import BoolTensor, LongTensor
 from torch.cuda.amp import autocast
 from torch.optim import SGD
 from contextlib import nullcontext
-from transformers import GPTNeoXForCausalLM#, GPTNeoXTokenizerFast
+from transformers import AutoModelForCausalLM, PreTrainedModel#, PreTrainedTokenizer, PreTrainedTokenizerFast, AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 import argparse
-from typing import List, NamedTuple
+from typing import List, NamedTuple#, Union
 
 class TorchCudaMemoryBytes(NamedTuple):
   alloc: int
@@ -76,16 +76,15 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
 
   device=torch.device('cuda')
 
-  model: GPTNeoXForCausalLM = GPTNeoXForCausalLM.from_pretrained(
+  model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
     args.model_name,
     cache_dir=args.cache_dir,
     device_map='auto' if args.device_map_auto else None,
-    # use_safetensors=True, # pythia-1.4b doesn't have a .safetensors distribution
   )
   param_count = sum([p.numel() for p in model.parameters()])
   print('param count', param_count)
 
-  # tokenizer: GPTNeoXTokenizerFast = GPTNeoXTokenizerFast.from_pretrained(
+  # tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast] = AutoTokenizer.from_pretrained(
   #   args.model_name,
   #   cache_dir=args.cache_dir,
   #   padding_side="right",
