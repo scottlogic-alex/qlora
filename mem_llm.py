@@ -87,7 +87,8 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
   # if args.batch_size > 1:
   #   tokenizer.add_special_tokens({'pad_token': '[PAD]'})
   #   model.resize_token_embeddings(len(tokenizer))
-  model.to(device)
+  if not args.device_map_auto:
+    model.to(device)
 
   if args.grad_ckpt:
     model.gradient_checkpointing_enable()
