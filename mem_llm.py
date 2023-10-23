@@ -106,8 +106,10 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
 
   if args.grad_ckpt:
     model.gradient_checkpointing_enable()
-  model.train()
-  model.zero_grad()
+
+  # accelerate uses these for the general case, but I think they're no-ops in our case; the model begins in train mode, and zero_grad does nothing if your grads are None
+  # model.train()
+  # model.zero_grad()
 
   optim = SGD(model.parameters(), lr=2e-5, momentum=0.)
 
