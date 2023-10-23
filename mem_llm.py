@@ -1,3 +1,4 @@
+from __future__ import annotations
 import torch
 from torch import BoolTensor, LongTensor, FloatTensor
 from torch.cuda.amp import autocast
@@ -11,6 +12,12 @@ from typing import List, NamedTuple
 class TorchCudaMemoryBytes(NamedTuple):
   alloc: int
   alloc_plus_reserved: int
+
+  def __add__(self, other: TorchCudaMemoryBytes) -> TorchCudaMemoryBytes:
+    return TorchCudaMemoryBytes(
+      alloc=self.alloc + other.alloc,
+      alloc_plus_reserved=self.alloc_plus_reserved + other.alloc_plus_reserved,
+    )
 
 def mib_str(bytes: int) -> str:
   return f'{f"{bytes/1024**2:.2f}".rjust(8)} MiB'
@@ -33,16 +40,15 @@ def mem(preamble: str, params: int, multi_device: bool):
   if multi_device and torch.cuda.device_count() > 1:
     out_lines: List[str] = []
     total_metric = TorchCudaMemoryBytes(0, 0)
-    maybe_preamble: str = preamble
+    once_preamble: str = preamble
     for device_ix in range(torch.cuda.device_count()):
       mem_metric: TorchCudaMemoryBytes = device_mem(device_ix)
-      total_metric.alloc += mem_metric.alloc
-      total_metric.alloc_plus_reserved += mem_metric.alloc_plus_reserved
+      total_metric += mem_metric
       summary: str = mem_summary(mem_metric, params)
-      out_lines.append(f'd{device_ix} {maybe_preamble}: {summary}')
-      maybe_preamble = ''.rjust(len(preamble))
+      out_lines.append(f'{once_preamble} d{device_ix}: {summary}')
+      once_preamble = ''.rjust(len(preamble))
     total_summary: str = mem_summary(total_metric, params)
-    out_lines.append(f' = {maybe_preamble}: {total_summary}')
+    out_lines.append(f'{once_preamble}  =: {total_summary}')
     return '\n'.join(out_lines)
   else:
     mem_metric: TorchCudaMemoryBytes = device_mem()
