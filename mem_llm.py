@@ -11,6 +11,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 import argparse
 from typing import List, NamedTuple#, Union
 from logging import getLogger, Formatter, StreamHandler
+from os import environ
 import logging
 
 logger = getLogger(__file__)
@@ -85,11 +86,11 @@ def main():
   parser.add_argument('--device_map_auto', action='store_true')
   parser.add_argument('--skip_ckpt_load', action='store_true')
   parser.add_argument('--mixed_bf16', action='store_true')
-  # if we run distributed: torchrun passes this option in. we use dist.get_rank() instead, to stick closer to the torch distributed tutorial.
+  # if we run distributed: torchrun passes this option in (though it's deprecated). we use dist.get_rank() instead, to stick closer to the torch distributed tutorial.
   parser.add_argument('--local-rank', type=int, default=None)
   args = parser.parse_args()
 
-  is_distributed: bool = args.local_rank is not None
+  is_distributed: bool = 'LOCAL_RANK' in environ
   if is_distributed:
     assert not args.device_map_auto, "Have not implemented support for device_map='auto' in distributed mode"
     dist.init_process_group("nccl")
