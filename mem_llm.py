@@ -4,7 +4,7 @@ from torch import BoolTensor, LongTensor
 from torch.cuda.amp import autocast
 from torch.optim import SGD
 from contextlib import nullcontext
-from transformers import AutoModelForCausalLM, PreTrainedModel#, PreTrainedTokenizer, PreTrainedTokenizerFast, AutoTokenizer
+from transformers import AutoModelForCausalLM, PreTrainedModel, AutoConfig, PretrainedConfig#, PreTrainedTokenizer, PreTrainedTokenizerFast, AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 import argparse
 from typing import List, NamedTuple#, Union
@@ -65,6 +65,7 @@ def main():
   parser.add_argument('--steps', type=int, default=1)
   parser.add_argument('--microsteps', type=int, default=1)
   parser.add_argument('--device_map_auto', action='store_true')
+  parser.add_argument('--skip_ckpt_load', action='store_true')
   parser.add_argument('--mixed_bf16', action='store_true')
   args = parser.parse_args()
 
@@ -76,11 +77,19 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
 
   device=torch.device('cuda')
 
-  model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-    args.model_name,
-    cache_dir=args.cache_dir,
-    device_map='auto' if args.device_map_auto else None,
-  )
+  if args.skip_ckpt_load:
+    assert not args.device_map_auto, "for some reason device_map='auto' support isn't implemented for AutoModelForCausalLM#from_config()"
+    config: PretrainedConfig = AutoConfig.from_pretrained(
+      args.model_name,
+      cache_dir=args.cache_dir,
+    )
+    model: PreTrainedModel = AutoModelForCausalLM.from_config(config)
+  else:
+    model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+      args.model_name,
+      cache_dir=args.cache_dir,
+      device_map='auto' if args.device_map_auto else None,
+    )
   param_count = sum([p.numel() for p in model.parameters()])
   print('param count', param_count)
 
