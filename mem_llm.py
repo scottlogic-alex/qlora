@@ -20,6 +20,7 @@ def mem(params: int, device_ix=0):
 def main():
   parser = argparse.ArgumentParser(prog='LLM finetuning memory measurer')
   parser.add_argument('--model_name', type=str, default='EleutherAI/pythia-70m-deduped')
+  parser.add_argument('--cache_dir', type=str, default=None)
   parser.add_argument('--batch_size', type=int, default=1)
   parser.add_argument('--seq_len', type=int, default=8)
   parser.add_argument('--grad_ckpt', action='store_true')
@@ -38,12 +39,14 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
 
   model: GPTNeoXForCausalLM = GPTNeoXForCausalLM.from_pretrained(
     args.model_name,
-    use_safetensors=True,
+    cache_dir=args.cache_dir,
+    # use_safetensors=True, # pythia-1.4b doesn't have a .safetensors distribution
   )
   param_count = sum([p.numel() for p in model.parameters()])
 
   # tokenizer: GPTNeoXTokenizerFast = GPTNeoXTokenizerFast.from_pretrained(
   #   args.model_name,
+  #   cache_dir=args.cache_dir,
   #   padding_side="right",
   # )
   # if args.batch_size > 1:
