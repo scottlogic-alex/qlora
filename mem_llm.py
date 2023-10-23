@@ -125,11 +125,12 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
           labels=labels,
           attention_mask=attention_mask,
         )
-        loss: FloatTensor = model_out['loss']
+        del model_out.logits, model_out.past_key_values
 
       if args.microsteps > 1:
-        loss /= args.microsteps
-      loss.backward()
+        model_out.loss /= args.microsteps
+      model_out.loss.backward()
+      del model_out
 
       print(mem(f'{step_and_micro_indicator}after loss backward', params=param_count, multi_device=args.device_map_auto))
 
