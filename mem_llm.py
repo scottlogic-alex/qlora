@@ -83,7 +83,7 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
     # use_safetensors=True, # pythia-1.4b doesn't have a .safetensors distribution
   )
   param_count = sum([p.numel() for p in model.parameters()])
-  # print('param count', param_count)
+  print('param count', param_count)
 
   # tokenizer: GPTNeoXTokenizerFast = GPTNeoXTokenizerFast.from_pretrained(
   #   args.model_name,
