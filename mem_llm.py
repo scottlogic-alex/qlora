@@ -6,16 +6,48 @@ from contextlib import nullcontext
 from transformers import GPTNeoXForCausalLM#, GPTNeoXTokenizerFast
 from transformers.modeling_outputs import CausalLMOutputWithPast
 import argparse
+from typing import List, NamedTuple
+
+class TorchCudaMemoryBytes(NamedTuple):
+  alloc: int
+  alloc_plus_reserved: int
 
 def mib_str(bytes: int) -> str:
   return f'{f"{bytes/1024**2:.2f}".rjust(8)} MiB'
 
-def mem(params: int, device_ix=0):
+def device_mem(device_ix=0) -> TorchCudaMemoryBytes:
   alloc: int = torch.cuda.memory_allocated(device_ix)
   alloc_plus_reserved: int = torch.cuda.memory_reserved(device_ix)
+  return TorchCudaMemoryBytes(
+    alloc=alloc,
+    alloc_plus_reserved=alloc_plus_reserved,
+  )
+
+def mem_summary(mem_metric: TorchCudaMemoryBytes, params: int) -> str:
+  alloc, alloc_plus_reserved = mem_metric
   reserved: int = alloc_plus_reserved-alloc
   bytes_per_param = alloc_plus_reserved/params
   return f'{mib_str(alloc_plus_reserved)}; {f"{bytes_per_param:.2f}".rjust(5)} bytes/param (of which {mib_str(alloc)} alloc, {mib_str(reserved)} reserved)'
+
+def mem(preamble: str, params: int, multi_device: bool):
+  if multi_device and torch.cuda.device_count() > 1:
+    out_lines: List[str] = []
+    total_metric = TorchCudaMemoryBytes(0, 0)
+    maybe_preamble: str = preamble
+    for device_ix in range(torch.cuda.device_count()):
+      mem_metric: TorchCudaMemoryBytes = device_mem(device_ix)
+      total_metric.alloc += mem_metric.alloc
+      total_metric.alloc_plus_reserved += mem_metric.alloc_plus_reserved
+      summary: str = mem_summary(mem_metric, params)
+      out_lines.append(f'd{device_ix} {maybe_preamble}: {summary}')
+      maybe_preamble = ''.rjust(len(preamble))
+    total_summary: str = mem_summary(total_metric, params)
+    out_lines.append(f' = {maybe_preamble}: {total_summary}')
+    return '\n'.join(out_lines)
+  else:
+    mem_metric: TorchCudaMemoryBytes = device_mem()
+    summary: str = mem_summary(mem_metric, params)
+    return f'{preamble}: {summary}'
 
 def main():
   parser = argparse.ArgumentParser(prog='LLM finetuning memory measurer')
@@ -26,6 +58,7 @@ def main():
   parser.add_argument('--grad_ckpt', action='store_true')
   parser.add_argument('--steps', type=int, default=1)
   parser.add_argument('--microsteps', type=int, default=1)
+  parser.add_argument('--device_map_auto', action='store_true')
   parser.add_argument('--mixed_bf16', action='store_true')
   args = parser.parse_args()
 
@@ -40,9 +73,11 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
   model: GPTNeoXForCausalLM = GPTNeoXForCausalLM.from_pretrained(
     args.model_name,
     cache_dir=args.cache_dir,
+    device_map='auto' if args.device_map_auto else None,
     # use_safetensors=True, # pythia-1.4b doesn't have a .safetensors distribution
   )
   param_count = sum([p.numel() for p in model.parameters()])
+  # print('param count', param_count)
 
   # tokenizer: GPTNeoXTokenizerFast = GPTNeoXTokenizerFast.from_pretrained(
   #   args.model_name,
@@ -89,11 +124,11 @@ precision: {'mixed' if args.mixed_bf16 else 'uniform'}''')
         loss /= args.microsteps
       loss.backward()
 
-      print(f'{step_and_micro_indicator}after loss backward: {mem(param_count)}')
+      print(mem(f'{step_and_micro_indicator}after loss backward', params=param_count, multi_device=args.device_map_auto))
 
     optim.step()
     optim.zero_grad(set_to_none=optim_set_to_none)
-    print(f'{step_indicator}{microstep_indicator_padding}after  zero_grad()): {mem(param_count)}')
+    print(mem(f'{step_indicator}{microstep_indicator_padding}after  zero_grad())', params=param_count, multi_device=args.device_map_auto))
   
 if __name__ == "__main__":
   main()
