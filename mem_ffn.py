@@ -38,8 +38,12 @@ out_dim = 4096
 batch_size = 1024
 print(f'batch={batch_size}')
 
-use_mixed = False
+use_mixed = True
 print(f'precision: {"mixed" if use_mixed else "uniform"}')
+
+cache_enabled = True
+if use_mixed:
+  print(f'cache_enabled: {cache_enabled}')
 
 realloc_each_microstep = True
 print(f'realloc_each_microstep: {realloc_each_microstep}')
@@ -95,7 +99,7 @@ print(f'after declare optim ({type(optim).__name__}{optim_extra_desc}): {mem()}'
 
 loss_fn = MSELoss()
 
-precision_ctx = autocast(dtype=torch.bfloat16, cache_enabled=True) if use_mixed else nullcontext()
+precision_ctx = autocast(dtype=torch.bfloat16, cache_enabled=cache_enabled) if use_mixed else nullcontext()
 
 steps = 1
 microsteps = 1
@@ -118,6 +122,7 @@ for step in range(steps):
       # y_pred2 = y_pred.float()
       # print(f'after y_pred cast: {mem()}')
       loss = loss_fn.forward(y_pred, y_true)
+      del y_pred
       # loss.retain_grad()
       print(pretty_mem(step_and_micro_indicator, f'after loss:'))
 
@@ -125,12 +130,14 @@ for step in range(steps):
       loss /= microsteps
     loss.backward()
     print(pretty_mem(step_and_micro_indicator, f'after backward:'))
+    del loss
+    print(pretty_mem(step_indicator, 'after del loss'))
 
   optim.step()
-  print(f'{step_indicator}after optim.step: {mem()}')
+  print(pretty_mem(step_indicator, 'after optim.step'))
   
   optim.zero_grad(set_to_none=optim_set_to_none)
-  print(f'{step_indicator}after optim.zero_grad ({optim_set_to_none}): {mem()}')
+  print(pretty_mem(step_indicator, f'after optim.zero_grad ({optim_set_to_none})'))
 
 print(f'model     (f32): {mib_str(sum([p.numel() for p in model.parameters()])*4)}')
 print(f'model.in  (f32): {mib_str(in_dim*hidden_dim*4)}')
@@ -143,7 +150,7 @@ if use_mixed:
   print(f'model.in  (f16): {mib_str(in_dim*hidden_dim*2)}')
   if layer_count > 2:
     print(f'model.mid (f16): {mib_str(hidden_dim**2*2)}')
-  print(f'activ.mid (f32): {mib_str(batch_size*hidden_dim*2)}')
+  print(f'activ.mid (f16): {mib_str(batch_size*hidden_dim*2)}')
   print(f'model.out (f16): {mib_str(hidden_dim*out_dim*2)}')
 print(f'x         (f32): {mib_str(batch_size*in_dim*4)}')
 print(f'y_true    (f32): {mib_str(batch_size*out_dim*4)}')
