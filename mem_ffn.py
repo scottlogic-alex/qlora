@@ -1,9 +1,9 @@
 import torch
-from torch import FloatTensor
+from torch import FloatTensor, Tensor
 from torch.nn import Linear, MSELoss, Module, Sequential, GELU
 from torch.cuda.amp import autocast
 from torch.optim import AdamW, SGD
-from typing import List
+from typing import List, Optional, Tuple
 from contextlib import nullcontext
 
 def gib_str(bytes: int) -> str:
@@ -27,7 +27,7 @@ def pretty_mem(
   alloc: int = torch.cuda.memory_allocated(device_ix)
   total: int = torch.cuda.memory_reserved(device_ix)
   reserved: int = total-alloc
-  return f'{preamble}{context.rjust(20)} {mib_str(alloc).rjust(10)} alloc {mib_str(reserved).rjust(10)} reserved {mib_str(total).rjust(10)} total'
+  return f'{preamble}{context.rjust(20)} {mib_str(alloc).rjust(11)} alloc {mib_str(reserved).rjust(11)} reserved {mib_str(total).rjust(11)} total'
 
 device=torch.device('cuda')
 
@@ -100,6 +100,32 @@ print(f'after declare optim ({type(optim).__name__}{optim_extra_desc}): {mem()}'
 loss_fn = MSELoss()
 
 precision_ctx = autocast(dtype=torch.bfloat16, cache_enabled=cache_enabled) if use_mixed else nullcontext()
+
+def hook_fn(m: Module, i: Tuple[Tensor, ...], o: Tuple[Tensor, ...]) -> Optional[Tensor]:
+  print(pretty_mem('', f"after bwd {m.__class__.__name__}:"))
+  # print(m)
+  # print("------------Input Grad------------")
+
+  # for grad in i:
+  #   try:
+  #     print(grad.shape)
+  #   except AttributeError: 
+  #     print("None found for Gradient")
+
+  # print("------------Output Grad------------")
+  # for grad in o:
+  #   try:
+  #     print(grad.shape)
+  #   except AttributeError: 
+  #     print("None found for Gradient")
+  # print("\n")
+
+def add_bwd_hook(mod: Module) -> None:
+  match(mod):
+    case Linear() | GELU():
+      mod.register_full_backward_hook(hook_fn)
+model.apply(add_bwd_hook)
+loss_fn.register_full_backward_hook(hook_fn)
 
 steps = 1
 microsteps = 1
