@@ -6,18 +6,11 @@ from torch.optim import AdamW, SGD
 from typing import List, Optional, Tuple
 from contextlib import nullcontext
 
-def gib_str(bytes: int) -> str:
-  return f'{bytes/1024**3:.2f}GiB'
-
 def mib_str(bytes: int) -> str:
   return f'{bytes/1024**2:.2f}MiB'
 
-def mem(device_ix=0):
-  # return torch.cuda.memory_summary()
-  alloc: int = torch.cuda.memory_allocated(device_ix)
-  total: int = torch.cuda.memory_reserved(device_ix)
-  reserved: int = total-alloc
-  return f'{mib_str(alloc)} alloc, {mib_str(reserved)} reserved, {mib_str(total)} total'
+def pretty_memory_snapshot() -> str:
+  return '\n'.join([f"""{f"{m['address']:02x}"[3:-5]}: {mib_str(m['allocated_size']).rjust(11)} alloc, {mib_str(m['total_size']).rjust(11)} total""" for m in torch.cuda.memory_snapshot()])
 
 def pretty_mem(
   preamble: str,
@@ -31,10 +24,10 @@ def pretty_mem(
 
 device=torch.device('cuda')
 
-layer_count = 3
+layer_count = 7
 in_dim = 4096
 hidden_dim = 16384
-out_dim = 4096
+out_dim = 8192
 batch_size = 1024
 print(f'batch={batch_size}')
 
@@ -58,6 +51,7 @@ class LoggingSequential(Sequential):
       layer_label = 'G' if isinstance(module, GELU) else 'L'
       dense_ix = int(ix / 2)
       print(pretty_mem(step_and_micro_indicator, f'after {layer_label}{dense_ix}.forward:'))
+      # print(pretty_memory_snapshot())
     return input
 
 class Model(Module):
@@ -89,13 +83,14 @@ model = Model(
   bias=False,
 )
 print(model)
-print(f'after declare model: {mem()}')
+print(pretty_mem('', 'after declare model:'))
+# print(pretty_memory_snapshot())
 
 # optim = AdamW(model.parameters(), lr=2e-5)
 momentum=0.
 optim = SGD(model.parameters(), lr=2e-5, momentum=momentum)
 optim_extra_desc = f', mom={momentum}' if isinstance(optim, SGD) else ''
-print(f'after declare optim ({type(optim).__name__}{optim_extra_desc}): {mem()}')
+print(pretty_mem('', f'after declare optim ({type(optim).__name__}{optim_extra_desc})'))
 
 loss_fn = MSELoss()
 
@@ -103,29 +98,18 @@ precision_ctx = autocast(dtype=torch.bfloat16, cache_enabled=cache_enabled) if u
 
 def hook_fn(m: Module, i: Tuple[Tensor, ...], o: Tuple[Tensor, ...]) -> Optional[Tensor]:
   print(pretty_mem('', f"after bwd {m.__class__.__name__}:"))
-  # print(m)
-  # print("------------Input Grad------------")
-
-  # for grad in i:
-  #   try:
-  #     print(grad.shape)
-  #   except AttributeError: 
-  #     print("None found for Gradient")
-
-  # print("------------Output Grad------------")
-  # for grad in o:
-  #   try:
-  #     print(grad.shape)
-  #   except AttributeError: 
-  #     print("None found for Gradient")
-  # print("\n")
+  # print(pretty_memory_snapshot())
 
 def add_bwd_hook(mod: Module) -> None:
   match(mod):
     case Linear() | GELU():
       mod.register_full_backward_hook(hook_fn)
 model.apply(add_bwd_hook)
-loss_fn.register_full_backward_hook(hook_fn)
+def pre_hook_fn(m: Module, o: Tuple[Tensor, ...]) -> Optional[Tensor]:
+  torch.cuda.synchronize()
+  print(pretty_mem('', f"after b_pre {m.__class__.__name__} {o[0].shape}:"))
+  # print(pretty_memory_snapshot())
+model.layers[-1].register_full_backward_pre_hook(pre_hook_fn)
 
 steps = 1
 microsteps = 1
@@ -139,23 +123,30 @@ for step in range(steps):
       x = torch.randn(batch_size, in_dim, device=device, requires_grad=False)
       y_true = torch.randn(batch_size, out_dim, device=device, requires_grad=False)
       print(pretty_mem(step_and_micro_indicator, f'after declare x/y:'))
+      # print(pretty_memory_snapshot())
 
     with precision_ctx:
       y_pred = model.forward(x)
       # y_pred.retain_grad()
       # print(pretty_mem(step_and_micro_indicator, f'after model.forward:'))
 
-      # y_pred2 = y_pred.float()
-      # print(f'after y_pred cast: {mem()}')
-      loss = loss_fn.forward(y_pred, y_true)
+      y_pred2 = y_pred.float()
       del y_pred
+      print(pretty_mem(step_and_micro_indicator, 'after y_pred32:'))
+      # print(pretty_memory_snapshot())
+      loss = loss_fn.forward(y_pred2, y_true)
+      del y_pred2
       # loss.retain_grad()
       print(pretty_mem(step_and_micro_indicator, f'after loss:'))
 
     if microsteps > 1:
       loss /= microsteps
+    torch.cuda.synchronize()
+    # print(pretty_memory_snapshot())
+    torch.cuda.synchronize()
     loss.backward()
     print(pretty_mem(step_and_micro_indicator, f'after backward:'))
+    # print(pretty_memory_snapshot())
     del loss
     print(pretty_mem(step_indicator, 'after del loss'))
 
@@ -184,8 +175,5 @@ if use_mixed:
   print(f'y_pred    (f16): {mib_str(batch_size*out_dim*2)}')
 else:
   print(f'y_pred    (f32): {mib_str(batch_size*out_dim*4)}')
-# torch.cuda.memory_snapshot()
-# [(f"{m['address']:02x}"[3:-5], mib_str(m['allocated_size'])) for m in torch.cuda.memory_snapshot()]
-# print('\n'.join([f"""{f"{m['address']:02x}"[3:-5]}: {mib_str(m['allocated_size']).rjust(9)} alloc""" for m in torch.cuda.memory_snapshot()]))
-# print('\n'.join([f"""{f"{m['address']:02x}"[3:-5]}: {mib_str(m['allocated_size']).rjust(9)} alloc, {mib_str(m['total_size']).rjust(9)} total""" for m in torch.cuda.memory_snapshot()]))
+# print(pretty_memory_snapshot())
 pass
